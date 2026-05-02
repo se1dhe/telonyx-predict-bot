@@ -1,0 +1,81 @@
+from __future__ import annotations
+from functools import lru_cache
+from typing import List
+from pydantic import Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+class Settings(BaseSettings):
+    """Настройки проекта."""
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+
+    telegram_bot_token: str = Field(..., alias="TELEGRAM_BOT_TOKEN")
+    telegram_target_chat_id: str = Field(..., alias="TELEGRAM_TARGET_CHAT_ID")
+    openai_api_key: str = Field(..., alias="OPENAI_API_KEY")
+    openai_model: str = Field("gpt-5.5", alias="OPENAI_MODEL")
+    serpapi_key: str | None = Field(None, alias="SERPAPI_KEY")
+    database_url: str = Field("sqlite+aiosqlite:///./data/bot.db", alias="DATABASE_URL")
+    tz: str = Field("Europe/Kiev", alias="TZ")
+    daily_run_hour: int = Field(5, alias="DAILY_RUN_HOUR")
+    matches_per_day: int = Field(5, alias="MATCHES_PER_DAY")
+    min_ai_confidence: int = Field(45, alias="MIN_AI_CONFIDENCE")
+    run_on_start: bool = Field(False, alias="RUN_ON_START")
+    max_raw_events: int = Field(10, alias="MAX_RAW_EVENTS")
+    max_candidates_for_ai: int = Field(5, alias="MAX_CANDIDATES_FOR_AI")
+    allowed_countries_raw: str = Field("", alias="ALLOWED_COUNTRIES")
+    preferred_league_ids_raw: str = Field("", alias="PREFERRED_LEAGUE_IDS")
+    data_provider: str = Field("LOCAL", alias="DATA_PROVIDER")
+    apifootball_key: str | None = Field(None, alias="APIFOOTBALL_KEY")
+    apifootball_host: str = Field("v3.football.api-sports.io", alias="APIFOOTBALL_HOST")
+    local_league_codes_raw: str = Field("E0,E1,SP1,I1,D1,F1,N1,P1,SC0", alias="LOCAL_LEAGUE_CODES")
+    local_lookahead_days: int = Field(1, alias="LOCAL_LOOKAHEAD_DAYS")
+    local_min_form_matches: int = Field(4, alias="LOCAL_MIN_FORM_MATCHES")
+    clubelo_enabled: bool = Field(True, alias="CLUBELO_ENABLED")
+
+    thesportsdb_enabled: bool = Field(True, alias="THESPORTSDB_ENABLED")
+    thesportsdb_api_key: str = Field("1", alias="THESPORTSDB_API_KEY")
+    thesportsdb_league_ids_raw: str = Field("4328,4335,4332,4331,4334,4337", alias="THESPORTSDB_LEAGUE_IDS")
+    espn_enabled: bool = Field(True, alias="ESPN_ENABLED")
+    espn_leagues_raw: str = Field("eng.1,esp.1,ita.1,ger.1,fra.1,ned.1,por.1,sco.1", alias="ESPN_LEAGUES")
+
+    @property
+    def allowed_countries(self) -> List[str]:
+        if not self.allowed_countries_raw.strip():
+            return []
+        return [x.strip().lower() for x in self.allowed_countries_raw.split(",") if x.strip()]
+
+    @property
+    def preferred_league_ids(self) -> List[int]:
+        if not self.preferred_league_ids_raw.strip():
+            return []
+        return [int(x.strip()) for x in self.preferred_league_ids_raw.split(",") if x.strip().isdigit()]
+
+    @property
+    def local_league_codes(self) -> List[str]:
+        if not self.local_league_codes_raw.strip():
+            return []
+        return [x.strip().upper() for x in self.local_league_codes_raw.split(",") if x.strip()]
+
+
+    @property
+    def thesportsdb_league_ids(self) -> List[str]:
+        """ID лиг TheSportsDB для fallback-расписания."""
+        if not self.thesportsdb_league_ids_raw.strip():
+            return []
+        return [x.strip() for x in self.thesportsdb_league_ids_raw.split(",") if x.strip()]
+
+
+    @property
+    def espn_leagues(self) -> List[str]:
+        """Коды футбольных лиг ESPN для fallback-расписания."""
+        if not self.espn_leagues_raw.strip():
+            return []
+        return [x.strip() for x in self.espn_leagues_raw.split(",") if x.strip()]
+
+    @property
+    def provider_normalized(self) -> str:
+        value = self.data_provider.strip().upper()
+        return value if value in {"LOCAL", "API_FOOTBALL"} else "LOCAL"
+
+@lru_cache
+def get_settings() -> Settings:
+    return Settings()
