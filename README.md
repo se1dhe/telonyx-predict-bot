@@ -792,3 +792,36 @@ RESULT_CHECK_INTERVAL_MINUTES="15"
 - Добавлена функция расчёта сезона football-data.co.uk в формате `2526`, `2627` и т.д.
 - После этого LOCAL pipeline снова может собирать историю матчей для контекста и не должен получать `0 прогнозов` из-за падения контекстов.
 
+
+
+## v38: OpenAI/Gemini provider switch
+
+Добавлено:
+
+- Переключение AI-провайдера через `AI_PROVIDER`.
+- Поддерживаются значения:
+  - `AI_PROVIDER="openai"`
+  - `AI_PROVIDER="gemini"`
+- Добавлены переменные:
+  - `GEMINI_API_KEY`
+  - `GEMINI_MODEL`
+- Gemini вызывается через Google Generative Language REST API без новой Python-зависимости.
+- Для Gemini включён `responseMimeType=application/json`, чтобы модель возвращала валидный JSON.
+
+Пример Gemini-режима:
+
+```env
+AI_ENABLED="true"
+AI_PROVIDER="gemini"
+GEMINI_API_KEY="your_google_ai_studio_key"
+GEMINI_MODEL="gemini-1.5-pro"
+```
+
+Fallback остаётся прежним:
+
+```env
+AI_FALLBACK_ON_ERROR="true"
+```
+
+Если Gemini/OpenAI даст ошибку, бот сможет перейти на локальный rule-based отбор.
+
