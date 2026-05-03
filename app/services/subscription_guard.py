@@ -9,18 +9,20 @@ from sqlalchemy import select
 from app.config import get_settings
 from app.db import SessionLocal
 from app.i18n import t
-from app.keyboards import main_menu
+from app.keyboards import main_menu, renew_subscription_keyboard
 from app.models import BotUser
 
 logger = logging.getLogger(__name__)
 
 
 async def _notify(bot: Bot, user: BotUser, text_key: str) -> None:
+    """Отправить уведомление о подписке сразу с кнопками продления."""
     lang = user.language_code if user.language_code in {"ru", "en"} else "ru"
+
     await bot.send_message(
         chat_id=user.telegram_user_id,
-        text=t(lang, text_key),
-        reply_markup=main_menu(lang),
+        text=t(lang, text_key) + "\n\n" + t(lang, "renew_subscription"),
+        reply_markup=renew_subscription_keyboard(lang),
         disable_web_page_preview=True,
     )
 

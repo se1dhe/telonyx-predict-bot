@@ -61,3 +61,45 @@ def back_keyboard(lang: str) -> dict:
     return inline_keyboard([
         [styled_button(t(lang, "back"), callback_data="menu:main")]
     ])
+
+
+
+def renew_subscription_keyboard(lang: str) -> dict:
+    """Клавиатура продления подписки прямо из уведомлений.
+
+    Для каждого срока даём две быстрые кнопки:
+    - Stars;
+    - PayKassa USDT.
+    """
+    settings = get_settings()
+    rows = []
+
+    plan_rows = [
+        ("1d", "renew_1d"),
+        ("3d", "renew_3d"),
+        ("30d", "renew_30d"),
+    ]
+
+    for code, label_key in plan_rows:
+        label = t(lang, label_key)
+        usdt = get_price_usdt(settings, code)
+        stars = get_price_stars(settings, code)
+
+        rows.append([
+            styled_button(
+                f"⭐ {label} · {stars} ⭐",
+                callback_data=f"pay:stars:{code}",
+                style="success",
+            ),
+            styled_button(
+                f"💵 {label} · {usdt:.2f} USDT",
+                callback_data=f"pay:paykassa:{code}",
+                style="primary",
+            ),
+        ])
+
+    rows.append([
+        styled_button(t(lang, "buy"), callback_data="menu:plans", style="primary"),
+    ])
+
+    return inline_keyboard(rows)
