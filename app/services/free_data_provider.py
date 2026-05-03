@@ -69,6 +69,7 @@ class LocalFixture:
     home_team: str
     away_team: str
     source: str = "unknown"
+    match_url: str = ""
 
 
 class FreeDataProvider:
@@ -208,6 +209,7 @@ class FreeDataProvider:
                     home_team=home,
                     away_team=away,
                     source="football-data.co.uk",
+                    match_url="",
                 )
             )
 
@@ -246,7 +248,11 @@ class FreeDataProvider:
             events = data.get("events") or []
 
             for event in events:
-                parsed_date = parse_thesportsdb_date(event.get("dateEvent") or "")
+                parsed_date, parsed_time = parse_thesportsdb_datetime(
+                    event.get("strTimestamp") or "",
+                    event.get("dateEvent") or "",
+                    event.get("strTime") or "",
+                )
                 if not parsed_date:
                     continue
 
@@ -263,10 +269,11 @@ class FreeDataProvider:
                         fixture_id=f"LOCAL:TSD:{event.get('idEvent') or ''}:{league_code}:{parsed_date.isoformat()}:{slugify(home)}:{slugify(away)}",
                         league_code=league_code,
                         date=parsed_date,
-                        time=(event.get("strTime") or "").strip(),
+                        time=parsed_time,
                         home_team=home,
                         away_team=away,
                         source="thesportsdb.com",
+                        match_url=f"https://www.thesportsdb.com/event/{event.get('idEvent')}",
                     )
                 )
 
@@ -339,6 +346,7 @@ class FreeDataProvider:
                         home_team=home,
                         away_team=away,
                         source="ESPN scoreboard",
+                        match_url=espn_event_url(event),
                     )
                 )
 
@@ -384,6 +392,7 @@ class FreeDataProvider:
             standings=standings,
             injuries=[],
             odds=odds,
+            match_url=fixture.match_url,
         )
 
         ctx.data_quality_score = calculate_data_quality(ctx)
@@ -456,6 +465,21 @@ class FreeDataProvider:
         return None
 
 
+def espn_event_url(event: dict[str, Any]) -> str:
+    """Достать точную ссылку ESPN на матч."""
+    links = event.get("links") or []
+    for link in links:
+        href = link.get("href")
+        if href:
+            return href
+
+    event_id = event.get("id")
+    if event_id:
+        return f"https://www.espn.com/soccer/match/_/gameId/{event_id}"
+
+    return ""
+
+
 def fixture_sort_key(fixture: LocalFixture) -> tuple[str, str, str, str]:
     """Ключ сортировки матчей."""
     return (fixture.date.isoformat(), fixture.time, fixture.league_code, fixture.home_team)
@@ -503,6 +527,29 @@ def parse_thesportsdb_date(value: str) -> date | None:
             continue
 
     return None
+
+
+def parse_thesportsdb_datetime(timestamp: str, date_value: str, time_value: str) -> tuple[date | None, str]:
+    """Разобрать дату/время TheSportsDB.
+
+    strTimestamp — самый точный вариант, обычно в UTC.
+    Если его нет, используем dateEvent + strTime.
+    """
+    timestamp = timestamp.strip()
+    if timestamp:
+        try:
+            normalized = timestamp.replace("Z", "+00:00")
+            dt = datetime.fromisoformat(normalized)
+            return dt.date(), dt.strftime("%H:%M")
+        except ValueError:
+            pass
+
+    parsed_date = parse_thesportsdb_date(date_value)
+    parsed_time = (time_value or "").strip()
+    if parsed_time and len(parsed_time) >= 5:
+        parsed_time = parsed_time[:5]
+
+    return parsed_date, parsed_time
 
 
 def parse_espn_event_datetime(value: str) -> tuple[date | None, str]:
