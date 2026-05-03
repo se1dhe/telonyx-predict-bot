@@ -78,3 +78,15 @@ PIPELINE_TIMEOUT_SECONDS=180
 HTTP_TIMEOUT_SECONDS=12
 NEWS_TIMEOUT_SECONDS=8
 ```
+
+
+## V5: фикс OpenAI temperature
+
+Исправлена ошибка:
+
+```text
+Unsupported parameter: 'temperature' is not supported with this model.
+```
+
+Теперь для моделей `gpt-5*`, `o1*`, `o3*`, `o4*` параметр `temperature` не передаётся.
+Для старых моделей он остаётся.

@@ -68,7 +68,19 @@ HOME_OR_DRAW_OVER_1_5, AWAY_OR_DRAW_OVER_1_5, HOME_DNB, AWAY_DNB, NO_BET.
 Кандидаты:
 {json.dumps(payload, ensure_ascii=False)}
 """
-        response = await self.client.responses.create(model=self.settings.openai_model, input=prompt, temperature=0.18)
+        # Важно:
+        # Некоторые reasoning-модели OpenAI не поддерживают temperature.
+        # Поэтому temperature передаём только для моделей, где это безопасно.
+        request_kwargs = {
+            "model": self.settings.openai_model,
+            "input": prompt,
+        }
+
+        model_name = self.settings.openai_model.lower()
+        if not model_name.startswith(("gpt-5", "o1", "o3", "o4")):
+            request_kwargs["temperature"] = 0.18
+
+        response = await self.client.responses.create(**request_kwargs)
         raw = response.output_text.strip()
         logger.info("AI raw response length: %s", len(raw))
         parsed = AiSelectionResponse.model_validate(extract_json(raw))
