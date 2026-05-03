@@ -137,8 +137,6 @@ def build_pick(ctx: CandidateContext) -> AiPick:
             who_should_score = f"{ctx.away_team} выглядит вероятнее по голу, но ставка лучше через общий рынок"
 
     warnings = list(ctx.rejection_risks)
-    if ctx.provider == "LOCAL":
-        warnings.append("LOCAL режим: нет гарантированно свежих составов и травм, используется статистика + новости")
 
     reasoning = (
         f"Форма {ctx.home_team}: {h.wins}-{h.draws}-{h.losses}, голы {h.goals_for}:{h.goals_against}, "

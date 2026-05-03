@@ -204,3 +204,43 @@ points = wins * 3 + draws
 
 Также исправлена логика fallback:
 если `AI_ENABLED=false`, ошибка локального алгоритма больше не маркируется как ошибка OpenAI и не запускается повторно.
+
+
+## V11: чистка пользовательского текста
+
+Из Telegram-сообщений убраны:
+- строка `Источник данных: LOCAL`;
+- блок `Что важно учитывать`;
+- предупреждение `LOCAL режим: нет гарантированно свежих составов и травм...`.
+
+Техническая информация остаётся только в Railway Logs.
+
+
+## V12: AI reasoning logs + bookmaker link
+
+Добавлено:
+- `LOG_AI_REASONING=true` — в Railway Logs пишутся:
+  - матч;
+  - ставка;
+  - confidence;
+  - risk;
+  - expected score;
+  - почему матч выбран;
+  - reasoning OpenAI/локального алгоритма;
+  - отклонённые AI матчи.
+- `BOOKMAKER_LINK_ENABLED=true` — в прогнозе появляется ссылка на линию букмекера.
+- По умолчанию используется поиск Pinnacle:
+  `https://www.pinnacle.com/en/search?s={query}`
+
+Важно:
+точный deeplink Pinnacle на конкретное событие не гарантируется без официальной настройки deeplinks.
+Поэтому ссылка букмекера сделана через настраиваемый template.
+
+Новые переменные:
+
+```env
+LOG_AI_REASONING=true
+BOOKMAKER_LINK_ENABLED=true
+BOOKMAKER_NAME=Pinnacle
+BOOKMAKER_SEARCH_URL_TEMPLATE=https://www.pinnacle.com/en/search?s={query}
+```

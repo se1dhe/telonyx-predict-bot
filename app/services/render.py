@@ -1,8 +1,41 @@
 from __future__ import annotations
 
 from datetime import datetime
+from urllib.parse import quote_plus
 
+from app.config import get_settings
 from app.schemas import AiPick, CandidateContext
+
+
+def bookmaker_url(match_title: str) -> str:
+    """Ссылка на поиск матча в букмекере.
+
+    Для Pinnacle точный deeplink на событие нельзя гарантировать без официальной настройки.
+    Поэтому по умолчанию используется поиск по названию матча.
+    Шаблон можно заменить через BOOKMAKER_SEARCH_URL_TEMPLATE.
+    """
+    settings = get_settings()
+    query = quote_plus(str(match_title))
+    home = quote_plus(str(match_title).split("—", 1)[0].strip()) if "—" in str(match_title) else query
+    away = quote_plus(str(match_title).split("—", 1)[1].strip()) if "—" in str(match_title) else ""
+
+    return (
+        settings.bookmaker_search_url_template
+        .replace("{query}", query)
+        .replace("{home}", home)
+        .replace("{away}", away)
+    )
+
+
+def bookmaker_link_line(match_title: str) -> str:
+    """HTML-строка ссылки на линию букмекера."""
+    settings = get_settings()
+    if not settings.bookmaker_link_enabled:
+        return ""
+
+    url = bookmaker_url(match_title)
+    name = html_escape(settings.bookmaker_name)
+    return f"💸 <a href=\"{html_escape(url)}\">Открыть линию {name}</a>"
 
 
 def html_escape(value: object) -> str:
@@ -84,7 +117,7 @@ def risk_emoji(risk: str) -> str:
 def format_match_time(ctx: CandidateContext | None) -> str:
     """Отформатировать дату и время матча."""
     if not ctx:
-        return "время уточнить в линии букмекера"
+        return "не указано источником"
 
     raw = ctx.start_time or ""
 
@@ -107,11 +140,11 @@ def format_match_time(ctx: CandidateContext | None) -> str:
     if len(raw) >= 10 and raw[4] == "-" and raw[7] == "-":
         try:
             dt = datetime.strptime(raw[:10], "%Y-%m-%d")
-            return dt.strftime("%d.%m.%Y, время уточнить")
+            return dt.strftime("%d.%m.%Y")
         except Exception:
             pass
 
-    return html_escape(raw) if raw else "время уточнить в линии букмекера"
+    return html_escape(raw) if raw else "не указано источником"
 
 
 def compact_reason(text: str, max_len: int = 420) -> str:
@@ -143,7 +176,6 @@ def render_daily_summary(
         "Я отобрал только матчи, где статистика выглядит достаточно чисто.",
         "Ниже — что именно искать в линии букмекера.",
         "",
-        f"🧩 <b>Источник данных:</b> {html_escape(provider or 'LOCAL/API')}",
         f"📌 <b>Матчей в отборе:</b> {len(picks)}",
         "",
     ]
@@ -151,7 +183,7 @@ def render_daily_summary(
     for i, p in enumerate(picks, start=1):
         ctx = contexts_by_id.get(p.fixture_id)
         match_time = format_match_time(ctx)
-        league = f"{ctx.country} • {ctx.league_name}" if ctx else "лига уточняется"
+        league = f"{ctx.country} • {ctx.league_name}" if ctx else "турнир не указан источником"
         bet = normalize_bet_label(p.main_bet_label)
 
         lines.extend(
@@ -164,6 +196,7 @@ def render_daily_summary(
                 f"{risk_emoji(p.risk_level)} <b>Риск:</b> {html_escape(p.risk_level)}",
                 f"🧠 <b>Уверенность:</b> {p.confidence}/100 ({confidence_text(p.confidence)})",
                 f"🔗 <a href=\"{html_escape(p.tracking_url)}\">Открыть матч</a>",
+                bookmaker_link_line(p.match_title),
                 "",
             ]
         )
@@ -184,17 +217,12 @@ def render_daily_summary(
 def render_pick_detail(p: AiPick, ctx: CandidateContext | None = None) -> str:
     """Детальный прогноз по одному матчу."""
     match_time = format_match_time(ctx)
-    league = f"{ctx.country} • {ctx.league_name}" if ctx else "лига уточняется"
+    league = f"{ctx.country} • {ctx.league_name}" if ctx else "турнир не указан источником"
     bet = normalize_bet_label(p.main_bet_label)
     safe_bet = normalize_bet_label(p.safe_bet_label)
     risky_bet = normalize_bet_label(p.risky_bet_label)
 
     warnings = ""
-    if p.data_warnings:
-        warnings = "\n\n⚠️ <b>Что важно учитывать:</b>\n" + "\n".join(
-            f"• {html_escape(x)}" for x in p.data_warnings[:4]
-        )
-
     data_block = ""
     if ctx:
         h = ctx.home_metrics
@@ -221,8 +249,8 @@ def render_pick_detail(p: AiPick, ctx: CandidateContext | None = None) -> str:
         f"💎 <b>Почему матч в отборе:</b>\n{html_escape(compact_reason(p.why_this_match_is_gold, 520))}\n\n"
         f"🧠 <b>Разбор:</b>\n{html_escape(compact_reason(p.reasoning, 900))}"
         f"{data_block}"
-        f"{warnings}\n\n"
-        f"🔗 <a href=\"{html_escape(p.tracking_url)}\">Открыть матч / проверить результат</a>\n\n"
+        f"🔗 <a href=\"{html_escape(p.tracking_url)}\">Открыть матч / проверить результат</a>\n"
+        f"{bookmaker_link_line(p.match_title)}\n\n"
         f"⚠️ <i>Не финансовый совет. Ставь только сумму, которую готов потерять.</i>"
     )
 

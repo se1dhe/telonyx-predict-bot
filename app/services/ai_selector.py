@@ -83,8 +83,34 @@ HOME_OR_DRAW_OVER_1_5, AWAY_OR_DRAW_OVER_1_5, HOME_DNB, AWAY_DNB, NO_BET.
         response = await self.client.responses.create(**request_kwargs)
         raw = response.output_text.strip()
         logger.info("AI raw response length: %s", len(raw))
+
+        if self.settings.log_ai_reasoning:
+            logger.info("LOG_AI_REASONING=true; AI raw preview: %s", raw[:2500])
+
         parsed = AiSelectionResponse.model_validate(extract_json(raw))
-        parsed.selected = [p for p in parsed.selected if p.main_bet_code != "NO_BET" and p.confidence >= self.settings.min_ai_confidence][:self.settings.matches_per_day]
+        parsed.selected = [
+            p for p in parsed.selected
+            if p.main_bet_code != "NO_BET" and p.confidence >= self.settings.min_ai_confidence
+        ][:self.settings.matches_per_day]
+
+        if self.settings.log_ai_reasoning:
+            for index, pick in enumerate(parsed.selected, start=1):
+                logger.info(
+                    "AI PICK #%s | match=%s | bet=%s | confidence=%s/100 | risk=%s | expected_score=%s",
+                    index,
+                    pick.match_title,
+                    pick.main_bet_label,
+                    pick.confidence,
+                    pick.risk_level,
+                    pick.expected_score,
+                )
+                logger.info("AI PICK #%s | why=%s", index, pick.why_this_match_is_gold)
+                logger.info("AI PICK #%s | reasoning=%s", index, pick.reasoning)
+                logger.info("AI PICK #%s | winner=%s | scorer=%s", index, pick.predicted_winner, pick.who_should_score)
+
+            for rejected in parsed.rejected_summary[:10]:
+                logger.info("AI REJECTED | %s", rejected)
+
         return parsed
 
 def extract_json(text: str) -> dict:

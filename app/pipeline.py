@@ -102,6 +102,7 @@ class DailyPipeline:
             ai_response = await self.rule_based.select_gold_matches(contexts)
 
         picks = self._enrich_picks_with_context(ai_response.selected, contexts)
+        self._log_selected_picks(picks)
         debug.append(f"✅ Выбрано матчей: {len(picks)}")
         if not picks:
             summary = "⚠️ AI не выбрал ни одного матча.\n\n<b>Диагностика:</b>\n" + "\n".join(debug)
@@ -127,6 +128,25 @@ class DailyPipeline:
         await self._save_predictions(date_key, picks, details, contexts, provider_name)
         await self._save_daily_run(date_key, summary, len(picks))
         return summary, details
+
+    def _log_selected_picks(self, picks: list[AiPick]) -> None:
+        """Писать в Railway Logs reasoning/уверенность по выбранным матчам."""
+        if not self.settings.log_ai_reasoning:
+            return
+
+        for index, pick in enumerate(picks, start=1):
+            logger.info(
+                "SELECTED PICK #%s | match=%s | bet=%s | confidence=%s/100 | risk=%s | score=%s | source=%s",
+                index,
+                pick.match_title,
+                pick.main_bet_label,
+                pick.confidence,
+                pick.risk_level,
+                pick.expected_score,
+                getattr(pick, "pick_source", ""),
+            )
+            logger.info("SELECTED PICK #%s | why=%s", index, pick.why_this_match_is_gold)
+            logger.info("SELECTED PICK #%s | reasoning=%s", index, pick.reasoning)
 
     def _enrich_picks_with_context(self, picks: list[AiPick], contexts: list[CandidateContext]) -> list[AiPick]:
         """Синхронизировать ссылку/дату/турнир прогноза с исходным контекстом."""
