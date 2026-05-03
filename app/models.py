@@ -68,3 +68,36 @@ class StatsReport(Base):
     report_type: Mapped[str] = mapped_column(String(32), default="daily_end")
     rendered_text: Mapped[str] = mapped_column(Text, default="")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class BotUser(Base):
+    """Пользователь Telegram-бота."""
+    __tablename__ = "bot_users"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    telegram_user_id: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    username: Mapped[str] = mapped_column(String(255), default="")
+    first_name: Mapped[str] = mapped_column(String(255), default="")
+    language_code: Mapped[str] = mapped_column(String(8), default="")
+    active_until: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class Transaction(Base):
+    """История платежей пользователя."""
+    __tablename__ = "transactions"
+    __table_args__ = (UniqueConstraint("provider", "external_id", name="uq_transaction_provider_external"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    telegram_user_id: Mapped[str] = mapped_column(String(64), index=True)
+    provider: Mapped[str] = mapped_column(String(32), index=True)
+    external_id: Mapped[str] = mapped_column(String(128), index=True)
+    plan_code: Mapped[str] = mapped_column(String(32), index=True)
+    amount_usdt: Mapped[str] = mapped_column(String(32), default="")
+    amount_stars: Mapped[int] = mapped_column(Integer, default=0)
+    status: Mapped[str] = mapped_column(String(32), default="created", index=True)
+    payment_url: Mapped[str] = mapped_column(Text, default="")
+    raw_payload: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    paid_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

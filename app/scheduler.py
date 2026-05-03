@@ -11,6 +11,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from app.config import get_settings
 from app.pipeline import DailyPipeline
 from app.result_checker import ResultChecker
+from app.services.channel_render import private_summary, public_summary_from_private
 
 
 logger = logging.getLogger(__name__)
@@ -45,7 +46,12 @@ async def safe_send_html(
 
 
 async def send_daily_gold_matches(bot: Bot) -> None:
-    """Ежедневный запуск прогнозов."""
+    """Ежедневный запуск прогнозов.
+
+    Логика каналов:
+    - приватный канал получает все найденные матчи;
+    - открытый канал получает только первый/самый сильный матч.
+    """
     settings = get_settings()
 
     try:
@@ -56,15 +62,34 @@ async def send_daily_gold_matches(bot: Bot) -> None:
         )
 
         logger.info("Сводка собрана. Детальных прогнозов: %s", len(details))
-        await safe_send_html(bot, settings.telegram_target_chat_id, summary)
+
+        private_chat = settings.telegram_private_channel_id or settings.telegram_target_chat_id
+        public_chat = settings.telegram_public_channel or settings.telegram_target_chat_id
+
+        # Приватный канал: полная сводка + все карточки.
+        await safe_send_html(bot, private_chat, private_summary(summary))
 
         if settings.show_detailed_picks:
             for detail in details:
                 await safe_send_html(
                     bot,
-                    settings.telegram_target_chat_id,
+                    private_chat,
                     detail[:3850] + "\n\n..." if len(detail) > 3900 else detail,
                 )
+
+        # Открытый канал: только самый сильный матч дня.
+        if details:
+            await safe_send_html(
+                bot,
+                public_chat,
+                public_summary_from_private(summary, details[0][:3400]),
+            )
+        else:
+            await safe_send_html(bot, public_chat, public_summary_from_private(summary, None))
+
+        # Совместимость: если target chat отличается от приватного/публичного, можно оставить debug-канал.
+        if settings.telegram_target_chat_id not in {private_chat, public_chat}:
+            await safe_send_html(bot, settings.telegram_target_chat_id, summary)
 
     except asyncio.TimeoutError:
         logger.exception("Pipeline завис дольше разрешённого времени")

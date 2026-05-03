@@ -10,6 +10,27 @@ class Settings(BaseSettings):
 
     telegram_bot_token: str = Field(..., alias="TELEGRAM_BOT_TOKEN")
     telegram_target_chat_id: str = Field(..., alias="TELEGRAM_TARGET_CHAT_ID")
+
+    telegram_private_channel_id: str = Field("", alias="TELEGRAM_PRIVATE_CHANNEL_ID")
+    telegram_public_channel: str = Field("@telonyx_predict", alias="TELEGRAM_PUBLIC_CHANNEL")
+    project_public_url: str = Field("https://predict.telonyx.app", alias="PROJECT_PUBLIC_URL")
+
+    price_1_day_usdt: float = Field(2.99, alias="PRICE_1_DAY_USDT")
+    price_3_days_usdt: float = Field(5.99, alias="PRICE_3_DAYS_USDT")
+    price_30_days_usdt: float = Field(19.99, alias="PRICE_30_DAYS_USDT")
+    stars_per_usdt: int = Field(50, alias="STARS_PER_USDT")
+
+    stars_provider_token: str = Field("", alias="STARS_PROVIDER_TOKEN")
+
+    paykassa_enabled: bool = Field(False, alias="PAYKASSA_ENABLED")
+    paykassa_sci_id: str = Field("", alias="PAYKASSA_SCI_ID")
+    paykassa_sci_key: str = Field("", alias="PAYKASSA_SCI_KEY")
+    paykassa_system: str = Field("tron_trc20", alias="PAYKASSA_SYSTEM")
+    paykassa_currency: str = Field("USDT", alias="PAYKASSA_CURRENCY")
+    paykassa_test_mode: bool = Field(False, alias="PAYKASSA_TEST_MODE")
+
+    web_host: str = Field("0.0.0.0", alias="WEB_HOST")
+    web_port: int = Field(8080, alias="PORT")
     openai_api_key: str = Field(..., alias="OPENAI_API_KEY")
     openai_model: str = Field("gpt-5.5", alias="OPENAI_MODEL")
     ai_enabled: bool = Field(True, alias="AI_ENABLED")

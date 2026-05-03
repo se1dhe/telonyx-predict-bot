@@ -429,3 +429,43 @@ BOOKMAKER_SEARCH_URL_TEMPLATE=
 ```env
 STATS_AFTER_EACH_FINISHED_MATCH_ENABLED=true
 ```
+
+
+## V20: монетизация, два канала, кабинет и платежи
+
+Добавлено:
+- два канала:
+  - `TELEGRAM_PRIVATE_CHANNEL_ID` — приватный канал со всеми прогнозами;
+  - `TELEGRAM_PUBLIC_CHANNEL` — бесплатный канал, куда постится 1 лучший матч дня.
+- бот-меню без текстовых команд после старта:
+  - выбор языка при первом запуске;
+  - RU/EN интерфейс;
+  - тарифы: 1 день, 3 дня, 1 месяц;
+  - личный кабинет;
+  - история транзакций.
+- Telegram Stars:
+  - цены считаются от USDT через `STARS_PER_USDT`;
+  - после успешной оплаты бот создаёт одноразовую ссылку в приватный канал.
+- PayKassa:
+  - endpoint `/paykassa/ipn`;
+  - домен проекта: `https://predict.telonyx.app`;
+  - после IPN бот подтверждает платёж и выдаёт invite link.
+- канальные посты стали bilingual-friendly: VIP/public заголовки RU/EN.
+
+### PayKassa endpoint
+
+В кабинете PayKassa нужно будет указать IPN/notification URL:
+
+```text
+https://predict.telonyx.app/paykassa/ipn
+```
+
+Healthcheck:
+
+```text
+https://predict.telonyx.app/health
+```
+
+### Важно
+
+Для выдачи доступа бот должен быть администратором приватного канала и иметь право создавать invite links.
