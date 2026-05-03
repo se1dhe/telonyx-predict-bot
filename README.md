@@ -622,3 +622,25 @@ await dp.start_polling(bot)
 - Telegram polling стартует сразу;
 - бот отвечает на команды и кнопки во время анализа;
 - добавлен `pipeline_lock`, чтобы тяжёлый сбор не запускался параллельно два раза.
+
+
+## V27: PayKassa 403 diagnostics + official TRON_TRC20 system
+
+По логам PayKassa отвечает:
+```text
+PayKassa HTTP 403: nginx
+```
+
+Это ответ не от нашего домена, а от `https://paykassa.pro/sci/0.3/index.php`.
+Для `sci_create_order` официальный пример PayKassa использует `system=TRON_TRC20`, а не `tron_trc20`,
+поэтому дефолт изменён на:
+
+```env
+PAYKASSA_SYSTEM=TRON_TRC20
+PAYKASSA_ENDPOINT=https://paykassa.pro/sci/0.3/index.php
+```
+
+Также:
+- добавлен `PAYKASSA_ENDPOINT`;
+- headers сделаны ближе к обычному form/curl запросу;
+- при 403 бот пишет более полезную диагностику в Railway Logs.

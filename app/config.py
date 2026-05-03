@@ -24,9 +24,10 @@ class Settings(BaseSettings):
     paykassa_enabled: bool = Field(False, alias="PAYKASSA_ENABLED")
     paykassa_sci_id: str = Field("", alias="PAYKASSA_SCI_ID")
     paykassa_sci_key: str = Field("", alias="PAYKASSA_SCI_KEY")
-    paykassa_system: str = Field("tron_trc20", alias="PAYKASSA_SYSTEM")
+    paykassa_system: str = Field("TRON_TRC20", alias="PAYKASSA_SYSTEM")
     paykassa_currency: str = Field("USDT", alias="PAYKASSA_CURRENCY")
     paykassa_test_mode: bool = Field(False, alias="PAYKASSA_TEST_MODE")
+    paykassa_endpoint: str = Field("https://paykassa.pro/sci/0.3/index.php", alias="PAYKASSA_ENDPOINT")
 
     web_host: str = Field("0.0.0.0", alias="WEB_HOST")
     web_port: int = Field(8080, alias="PORT")

@@ -27,10 +27,9 @@ class PayKassaClient:
     Поэтому мы сначала читаем raw text, логируем его, а потом уже пытаемся распарсить.
     """
 
-    endpoint = "https://paykassa.pro/sci/0.3/index.php"
-
     def __init__(self) -> None:
         self.settings = get_settings()
+        self.endpoint = self.settings.paykassa_endpoint
 
     async def create_order(self, amount: float, order_id: str, comment: str) -> str:
         if not self.settings.paykassa_enabled:
@@ -44,7 +43,7 @@ class PayKassaClient:
             "currency": self.settings.paykassa_currency,
             "order_id": order_id,
             "comment": comment,
-            "system": self.settings.paykassa_system,
+            "system": self.settings.paykassa_system.strip().upper(),
             "sci_id": self.settings.paykassa_sci_id,
             "sci_key": self.settings.paykassa_sci_key,
             "domain": self._domain(),
@@ -84,7 +83,10 @@ class PayKassaClient:
                 data=payload,
                 headers={
                     "Accept": "application/json, text/plain, */*",
-                    "User-Agent": "TelOnyxPredictBot/1.0",
+                    "Content-Type": "application/x-www-form-urlencoded",
+                    "User-Agent": "Mozilla/5.0 (compatible; TelOnyxPredictBot/1.0; +https://predict.telonyx.app)",
+                    "Origin": "https://predict.telonyx.app",
+                    "Referer": "https://predict.telonyx.app/",
                 },
             ) as response:
                 raw_text = await response.text()
@@ -92,7 +94,12 @@ class PayKassaClient:
         logger.info("PayKassa %s HTTP response: status=%s body=%s", operation, response.status, raw_text[:4000])
 
         if response.status >= 400:
-            raise RuntimeError(f"PayKassa HTTP {response.status}: {raw_text[:1000]}")
+            raise RuntimeError(
+                f"PayKassa HTTP {response.status}: {raw_text[:1000]} | "
+                "Если это 403 nginx, проверь: активирован ли магазин, совпадает ли test mode, "
+                "верный ли Merchant ID/Password, разрешён ли домен predict.telonyx.app, "
+                "и попробуй PAYKASSA_SYSTEM=TRON_TRC20."
+            )
 
         parsed = self._parse_response(raw_text)
 
