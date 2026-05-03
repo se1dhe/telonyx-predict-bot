@@ -44,12 +44,15 @@ class CandidateContext(BaseModel):
     injuries: list[dict[str, Any]] = Field(default_factory=list)
     odds: list[dict[str, Any]] = Field(default_factory=list)
     news: list[dict[str, Any]] = Field(default_factory=list)
+    match_url: str = ""
     data_quality_score: int = 0
     pre_ai_score: int = 0
     rejection_risks: list[str] = Field(default_factory=list)
 
     @property
     def tracking_url(self) -> str:
+        if self.match_url:
+            return self.match_url
         q = quote_plus(f"{self.home_team} {self.away_team}")
         return f"https://www.sofascore.com/search?q={q}"
 

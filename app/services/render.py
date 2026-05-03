@@ -227,9 +227,15 @@ def render_pick_detail(p: AiPick, ctx: CandidateContext | None = None) -> str:
     )
 
 
-def render_result_line(match_title: str, score: str, bet: str, success: bool) -> str:
+def render_result_line(match_title: str, score: str, bet: str, status: str) -> str:
     """Строка результата прогноза."""
-    mark = "✅ зашло" if success else "❌ не зашло"
+    if status == "win":
+        mark = "✅ зашло"
+    elif status == "void":
+        mark = "↩️ возврат"
+    else:
+        mark = "❌ не зашло"
+
     return (
         f"{mark} — <b>{html_escape(match_title)}</b>\n"
         f"Счёт: <b>{html_escape(score)}</b>\n"

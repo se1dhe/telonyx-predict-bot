@@ -81,40 +81,63 @@ class DailyPipeline:
                 logger.info("Pipeline: OpenAI вернул выбранных матчей: %s", len(ai_response.selected))
             else:
                 logger.info("Pipeline: OpenAI отключён, использую локальный rule-based selector")
-                debug_lines.append("🧠 OpenAI: отключён, используется локальный алгоритм")
+                debug.append("🧠 OpenAI: отключён, используется локальный алгоритм")
                 ai_response = await self.rule_based.select_gold_matches(contexts)
         except Exception as exc:
             safe_error = escape(str(exc)[:1000])
 
             if self.settings.ai_fallback_on_error:
                 logger.exception("OpenAI не смог выбрать матчи, включаю rule-based fallback")
-                debug_lines.append("🧠 OpenAI: ошибка, используется локальный fallback")
-                debug_lines.append(f"⚠️ OpenAI error: <code>{safe_error}</code>")
+                debug.append("🧠 OpenAI: ошибка, используется локальный fallback")
+                debug.append(f"⚠️ OpenAI error: <code>{safe_error}</code>")
                 ai_response = await self.rule_based.select_gold_matches(contexts)
             else:
                 summary = (
                     "⚠️ AI не смог выбрать матчи.\n\n"
                     "<b>Диагностика:</b>\n"
-                    + "\n".join(debug_lines)
+                    + "\n".join(debug)
                     + f"\n\n<b>Ошибка AI:</b>\n<code>{safe_error}</code>"
                 )
                 await self._save_daily_run(date_key, summary, 0)
                 return summary, []
 
-        picks = ai_response.selected
-        debug.append(f"✅ AI выбрал матчей: {len(picks)}")
+        picks = self._enrich_picks_with_context(ai_response.selected, contexts)
+        debug.append(f"✅ Выбрано матчей: {len(picks)}")
         if not picks:
             summary = "⚠️ AI не выбрал ни одного матча.\n\n<b>Диагностика:</b>\n" + "\n".join(debug)
             if ai_response.rejected_summary:
                 summary += "\n\n<b>Что AI отклонил:</b>\n" + "\n".join(f"• {escape(x)}" for x in ai_response.rejected_summary[:8])
             await self._save_daily_run(date_key, summary, 0)
             return summary, []
-        summary = render_daily_summary(picks, ai_response.rejected_summary, provider=provider_name)
-        summary += "\n\n<b>Техническая диагностика:</b>\n" + "\n".join(debug)
-        details = [render_pick_detail(p) for p in picks]
+        ctx_by_id = {ctx.fixture_id: ctx for ctx in contexts}
+        summary = render_daily_summary(
+            picks,
+            ai_response.rejected_summary,
+            provider=provider_name,
+            contexts_by_id=ctx_by_id,
+        )
+
+        # Техническую диагностику не показываем пользователю, только в Railway Logs.
+        logger.info("Техническая диагностика daily run:\n%s", "\n".join(debug))
+
+        if self.settings.show_tech_diagnostics:
+            summary += "\n\n<b>Техническая диагностика:</b>\n" + "\n".join(debug)
+
+        details = [render_pick_detail(p, ctx_by_id.get(p.fixture_id)) for p in picks]
         await self._save_predictions(date_key, picks, details, contexts, provider_name)
         await self._save_daily_run(date_key, summary, len(picks))
         return summary, details
+
+    def _enrich_picks_with_context(self, picks: list[AiPick], contexts: list[CandidateContext]) -> list[AiPick]:
+        """Синхронизировать ссылку/дату/турнир прогноза с исходным контекстом."""
+        ctx_by_id = {ctx.fixture_id: ctx for ctx in contexts}
+        for pick in picks:
+            ctx = ctx_by_id.get(pick.fixture_id)
+            if not ctx:
+                continue
+            # AI обязан брать tracking_url из контекста, но дополнительно страхуемся.
+            pick.tracking_url = ctx.tracking_url
+        return picks
 
     def _filter_raw_fixtures(self, fixtures: list) -> list:
         if self.settings.provider_normalized == "LOCAL":

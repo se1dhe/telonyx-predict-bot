@@ -53,3 +53,18 @@ class StatsSnapshot(Base):
     failed_predictions: Mapped[int] = mapped_column(Integer, default=0)
     winrate_percent: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class StatsReport(Base):
+    """Отправленный отчёт статистики.
+
+    Нужен, чтобы бот не спамил одинаковый отчёт при redeploy или повторном запуске.
+    """
+    __tablename__ = "stats_reports"
+    __table_args__ = (UniqueConstraint("date_key", "report_type", name="uq_stats_report_date_type"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    date_key: Mapped[str] = mapped_column(String(16), index=True)
+    report_type: Mapped[str] = mapped_column(String(32), default="daily_end")
+    rendered_text: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

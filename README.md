@@ -154,3 +154,31 @@ SHOW_DETAILED_PICKS=true
 - для TheSportsDB используется точная ссылка `https://www.thesportsdb.com/event/{idEvent}`;
 - для ESPN используется точная ссылка ESPN на конкретный матч;
 - SofaScore search остаётся только как fallback, если точной ссылки источник не дал.
+
+
+## V9: статистика winrate
+
+Бот ведёт статистику по каждому прогнозу:
+- сохраняет прогнозы в таблицу `predictions`;
+- каждый час проверяет открытые прогнозы;
+- закрывает прогноз как плюс/минус/возврат;
+- в конце игрового дня отправляет отчёт winrate за день;
+- в этом же отчёте показывает winrate за всё время.
+
+Новые переменные:
+
+```env
+STATS_REPORT_ENABLED=true
+DAILY_STATS_HOUR=23
+DAILY_STATS_MINUTE=55
+SHOW_TECH_DIAGNOSTICS=false
+SHOW_DETAILED_PICKS=true
+```
+
+Winrate считается так:
+
+```text
+плюсы / (плюсы + минусы)
+```
+
+Возвраты по форе 0 / DNB не считаются ни плюсом, ни минусом.
