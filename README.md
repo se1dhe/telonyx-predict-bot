@@ -491,3 +491,60 @@ SUBSCRIPTION_KICK_ENABLED=true
 SUBSCRIPTION_NOTIFY_ENABLED=true
 STYLED_BUTTONS_ENABLED=true
 ```
+
+
+## V22: TelOnyx payment pages + PayKassa test setup
+
+Добавлены страницы:
+```text
+https://predict.telonyx.app/payment/success
+https://predict.telonyx.app/payment/fail
+```
+
+Они оформлены в тёмном TelOnyx-стиле и подходят для redirect URL в PayKassa.
+
+### Данные для PayKassa
+
+В кабинете PayKassa:
+```text
+URL мерчанта:
+https://predict.telonyx.app
+
+URL уведомлений об оплате инвойса [sci_confirm_order]:
+https://predict.telonyx.app/paykassa/ipn
+
+URL успешной оплаты [redirect]:
+https://predict.telonyx.app/payment/success
+
+URL сбоя при оплате [redirect]:
+https://predict.telonyx.app/payment/fail
+
+URL обработчика транзакций криптовалют [sci_confirm_transaction_notification]:
+оставить пустым
+
+Принимать любую сумму:
+Нет
+
+Тестовый режим (SCI/API):
+Включён на время отладки
+```
+
+Railway:
+```env
+PAYKASSA_ENABLED=true
+PAYKASSA_TEST_MODE=true
+PROJECT_PUBLIC_URL=https://predict.telonyx.app
+```
+
+
+## V23: TELEGRAM_TARGET_CHAT_ID удалён
+
+Теперь используется только один закрытый канал:
+
+```env
+TELEGRAM_PRIVATE_CHANNEL_ID=-1003952952921
+```
+
+`TELEGRAM_TARGET_CHAT_ID` полностью удалён из настроек и больше не нужен.
+Все технические сообщения, ошибки, приватные прогнозы, результаты матчей и VIP-отчёты отправляются в `TELEGRAM_PRIVATE_CHANNEL_ID`.
+Публичный бесплатный прогноз отправляется в `TELEGRAM_PUBLIC_CHANNEL`.

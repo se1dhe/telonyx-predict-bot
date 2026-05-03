@@ -9,7 +9,6 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     telegram_bot_token: str = Field(..., alias="TELEGRAM_BOT_TOKEN")
-    telegram_target_chat_id: str = Field(..., alias="TELEGRAM_TARGET_CHAT_ID")
 
     telegram_private_channel_id: str = Field("", alias="TELEGRAM_PRIVATE_CHANNEL_ID")
     telegram_public_channel: str = Field("@telonyx_predict", alias="TELEGRAM_PUBLIC_CHANNEL")

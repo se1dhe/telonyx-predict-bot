@@ -64,8 +64,8 @@ async def send_daily_gold_matches(bot: Bot) -> None:
 
         logger.info("Сводка собрана. Детальных прогнозов: %s", len(details))
 
-        private_chat = settings.telegram_private_channel_id or settings.telegram_target_chat_id
-        public_chat = settings.telegram_public_channel or settings.telegram_target_chat_id
+        private_chat = settings.telegram_private_channel_id
+        public_chat = settings.telegram_public_channel
 
         # Приватный канал: полная сводка + все карточки.
         await safe_send_html(bot, private_chat, private_summary(summary))
@@ -88,14 +88,10 @@ async def send_daily_gold_matches(bot: Bot) -> None:
         else:
             await safe_send_html(bot, public_chat, public_summary_from_private(summary, None))
 
-        # Совместимость: если target chat отличается от приватного/публичного, можно оставить debug-канал.
-        if settings.telegram_target_chat_id not in {private_chat, public_chat}:
-            await safe_send_html(bot, settings.telegram_target_chat_id, summary)
-
     except asyncio.TimeoutError:
         logger.exception("Pipeline завис дольше разрешённого времени")
         await bot.send_message(
-            chat_id=settings.telegram_target_chat_id,
+            chat_id=settings.telegram_private_channel_id,
             text=(
                 "⚠️ Сбор прогнозов остановлен по таймауту.\n\n"
                 "Бот не упал, но внешний источник или AI отвечал слишком долго. "
@@ -109,7 +105,7 @@ async def send_daily_gold_matches(bot: Bot) -> None:
         logger.exception("Ошибка при сборе прогнозов")
         logger.error("Полный traceback:\n%s", traceback.format_exc())
         await bot.send_message(
-            chat_id=settings.telegram_target_chat_id,
+            chat_id=settings.telegram_private_channel_id,
             text="⚠️ Ошибка при сборе прогнозов.\n\nПодробности записаны в Railway Logs.",
             parse_mode=None,
             disable_web_page_preview=True,
@@ -128,7 +124,7 @@ async def check_results(bot: Bot) -> None:
         logger.exception("Ошибка при проверке результатов")
         logger.error("Полный traceback:\n%s", traceback.format_exc())
         await bot.send_message(
-            chat_id=settings.telegram_target_chat_id,
+            chat_id=settings.telegram_private_channel_id,
             text="⚠️ Ошибка при проверке результатов.\n\nПодробности записаны в Railway Logs.",
             parse_mode=None,
             disable_web_page_preview=True,
@@ -152,7 +148,7 @@ async def send_daily_stats_report(bot: Bot) -> None:
         logger.exception("Ошибка при отправке статистики")
         logger.error("Полный traceback:\n%s", traceback.format_exc())
         await bot.send_message(
-            chat_id=settings.telegram_target_chat_id,
+            chat_id=settings.telegram_private_channel_id,
             text="⚠️ Ошибка при отправке статистики.\n\nПодробности записаны в Railway Logs.",
             parse_mode=None,
             disable_web_page_preview=True,

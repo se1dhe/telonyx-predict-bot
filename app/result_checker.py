@@ -92,7 +92,7 @@ class ResultChecker:
                     text += f"\n\n{daily_stats}"
 
                 await self.bot.send_message(
-                    self.settings.telegram_target_chat_id,
+                    self.settings.telegram_private_channel_id,
                     text,
                     parse_mode=ParseMode.HTML,
                     disable_web_page_preview=True,
@@ -119,7 +119,7 @@ class ResultChecker:
 
         text = await render_daily_end_stats_report(date_key)
         await self.bot.send_message(
-            self.settings.telegram_target_chat_id,
+            self.settings.telegram_private_channel_id,
             text,
             parse_mode=ParseMode.HTML,
             disable_web_page_preview=True,
