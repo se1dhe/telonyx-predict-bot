@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 from urllib.parse import quote_plus
 import re
 
@@ -33,7 +34,7 @@ LABELS = {
         "bookmaker": "Відкрити лінію",
         "how": "💰 <b>Як використовувати:</b>\n• не став увесь банк на один матч;\n• не замінюй ринок на інший, якщо потрібної ставки немає;\n• якщо коефіцієнт сильно просів — краще пропустити;\n• це аналітика, а не гарантія виграшу.",
         "no_matches": "⚠️ <b>На сьогодні не знайдено достатньо якісних матчів.</b>\n\nБот не буде публікувати слабкі або сумнівні варіанти тільки заради кількості.",
-        "date_time": "🗓 <b>Дата/час:</b>",
+        "date_time": "🗓 <b>Дата/час (Київ):</b>",
         "league": "🏟 <b>Турнір:</b>",
         "main_bet": "✅ <b>Основна ставка:</b>",
         "safe": "🛡 <b>Обережніший варіант:</b>",
@@ -61,7 +62,7 @@ LABELS = {
         "bookmaker": "Open odds at",
         "how": "💰 <b>How to use:</b>\n• do not risk your whole bankroll on one match;\n• do not replace the market if the exact pick is unavailable;\n• if the odds dropped too much, it is better to skip;\n• this is analysis, not a guaranteed win.",
         "no_matches": "⚠️ <b>No sufficiently strong matches found for today.</b>\n\nThe bot will not post weak or questionable picks just to fill the quota.",
-        "date_time": "🗓 <b>Date/time:</b>",
+        "date_time": "🗓 <b>Date/time (Kyiv):</b>",
         "league": "🏟 <b>Competition:</b>",
         "main_bet": "✅ <b>Main pick:</b>",
         "safe": "🛡 <b>Safer option:</b>",
@@ -89,7 +90,7 @@ LABELS = {
         "bookmaker": "Открыть линию",
         "how": "💰 <b>Как использовать:</b>\n• не ставь весь банк на один матч;\n• не заменяй рынок на другой, если нужной ставки нет;\n• если коэффициент сильно просел — лучше пропустить;\n• это аналитика, а не гарантия выигрыша.",
         "no_matches": "⚠️ <b>На сегодня не найдено достаточно качественных матчей.</b>\n\nБот не будет публиковать слабые или сомнительные варианты только ради количества.",
-        "date_time": "🗓 <b>Дата/время:</b>",
+        "date_time": "🗓 <b>Дата/время (Киев):</b>",
         "league": "🏟 <b>Турнир:</b>",
         "main_bet": "✅ <b>Основная ставка:</b>",
         "safe": "🛡 <b>Осторожный вариант:</b>",
@@ -144,9 +145,12 @@ def is_mixed_or_wrong_language(text: str, lang: str) -> bool:
         return True
 
     ru_markers = [
-        "матч прошёл", "прошел", "локальный фильтр", "есть статистическая база",
-        "голов", "голевым", "форма ", "общий фон", "безопаснее", "вероятнее",
-        "ставка лучше", "выглядит", "через общий рынок", "по голу",
+        "матч прошёл", "матч прошел", "прошел", "прошёл", "локальный фильтр",
+        "есть статистическая база", "статистическая база", "голов", "голами",
+        "голевым", "голевыми", "форма ", "общий фон", "безопаснее",
+        "вероятнее", "ставка лучше", "выглядит", "через общий рынок",
+        "по голу", "к победе", "должен забить", "минимум один",
+        "агрессив", "последние цифры", "размер ставки",
     ]
     uk_markers = [
         "матч пройшов", "локальний фільтр", "є статистична база",
@@ -165,14 +169,33 @@ def is_mixed_or_wrong_language(text: str, lang: str) -> bool:
 
 
 def format_match_time(ctx: CandidateContext | None, lang: str = "uk") -> str:
+    """Вернуть время матча в таймзоне проекта.
+
+    Важно: часть бесплатных источников отдаёт время в UTC или без tzinfo.
+    Для стабильности naive-время считаем UTC и переводим в TZ из env
+    (по умолчанию Europe/Kiev). Поэтому в постах будет именно киевское время.
+    """
     if not ctx:
         return L(lang, "time_missing")
+
     value = getattr(ctx, "start_time", "") or getattr(ctx.event, "start_time", "") or ""
     if not value:
         return L(lang, "time_missing")
+
     try:
-        dt = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
-        return dt.strftime("%Y-%m-%d %H:%M")
+        raw = str(value).strip()
+        dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+
+        target_tz_name = getattr(get_settings(), "tz", "Europe/Kiev") or "Europe/Kiev"
+        try:
+            target_tz = ZoneInfo(target_tz_name)
+        except Exception:
+            target_tz = ZoneInfo("Europe/Kiev")
+
+        return dt.astimezone(target_tz).strftime("%Y-%m-%d %H:%M")
     except Exception:
         return str(value)
 
@@ -433,40 +456,90 @@ def render_pick_detail(p: AiPick, ctx: CandidateContext | None = None, lang: str
 
 
 def localize_free_text(text: str, lang: str) -> str:
+    """Нормализовать свободные поля AI/fallback под язык канала.
+
+    Эти поля часто приходят как полу-свободный текст, поэтому здесь
+    убираем русско-украинскую смесь, которую видно в постах.
+    """
     lang = normalize_lang(lang)
     value = str(text or "").strip()
     low = value.lower()
 
     if lang == "uk":
-        rules = [
+        # Сначала — готовые частые фразы.
+        phrase_rules = [
+            ("исход лучше не трогать", "результат краще не чіпати"),
             ("исход опасный", "результат ризиковий"),
             ("исход рискованный", "результат ризиковий"),
             ("опасный исход", "ризиковий результат"),
-            ("безопаснее через тотал", "безпечніше через тотал"),
+            ("матч выглядит равным", "матч виглядає рівним"),
+            ("ближе к победе", "ближче до перемоги"),
+            ("чуть ближе к победе", "трохи ближче до перемоги"),
+            ("чуть ближе", "трохи ближче"),
             ("безопаснее через общий рынок", "безпечніше через загальний ринок"),
+            ("безопаснее через тотал", "безпечніше через тотал"),
+            ("безопаснее через x2", "безпечніше через X2"),
+            ("безопаснее через 1x", "безпечніше через 1X"),
             ("лучше через общий рынок", "краще через загальний ринок"),
+            ("ставка лучше через общий рынок", "ставка краще через загальний ринок"),
             ("выглядит вероятнее по голу", "виглядає ймовірніше за голом"),
             ("вероятнее по голу", "ймовірніше за голом"),
-            ("чуть ближе", "трохи ближче"),
+            ("должен забить минимум один", "має забити мінімум один"),
+            ("должна забить минимум один", "має забити мінімум один"),
+            ("должны забить минимум один", "мають забити мінімум один"),
+            ("должен забить", "має забити"),
+            ("должна забить", "має забити"),
+            ("должны забить", "мають забити"),
+            ("минимум один", "мінімум один"),
+            ("по голу", "за голом"),
+            ("к победе", "до перемоги"),
+        ]
+
+        word_rules = [
+            ("но", "але"),
             ("хозяева", "господарі"),
             ("гости", "гості"),
             ("победа", "перемога"),
-            ("не проиграет", "не програє"),
-            ("не проиграют", "не програють"),
-            ("тотал больше", "тотал більше"),
-            ("обе команды забьют", "обидві команди заб’ють"),
-            ("ставка лучше", "ставка краще"),
-            (" по голу", " за голом"),
-            (" но ", " але "),
-            (" но,", " але,"),
-            ("но ", "але "),
-            ("рынок", "ринок"),
+            ("победе", "перемоги"),
+            ("проиграет", "програє"),
+            ("проиграют", "програють"),
+            ("вероятнее", "ймовірніше"),
+            ("безопаснее", "безпечніше"),
+            ("выглядит", "виглядає"),
             ("общий", "загальний"),
-            ("ставка", "ставка"),
+            ("рынок", "ринок"),
+            ("рынка", "ринку"),
+            ("голов", "голів"),
+            ("голами", "голами"),
+            ("голы", "голи"),
+            ("голевым", "гольовим"),
+            ("голевыми", "гольовими"),
+            ("последние", "останні"),
+            ("цифры", "цифри"),
+            ("размер", "розмір"),
+            ("уверенность", "упевненість"),
+            ("должен", "має"),
+            ("должна", "має"),
+            ("должны", "мають"),
+            ("агрессивный", "агресивний"),
+            ("агрессивний", "агресивний"),
+            ("минимум", "мінімум"),
+            ("один", "один"),
         ]
+
         result = value
-        for src, dst in rules:
-            result = re.sub(src, dst, result, flags=re.IGNORECASE)
+
+        for src, dst in phrase_rules:
+            result = re.sub(re.escape(src), dst, result, flags=re.IGNORECASE)
+
+        # Замены отдельных слов по границам слова, чтобы не ломать названия команд.
+        for src, dst in word_rules:
+            result = re.sub(rf"(?<![A-Za-zА-Яа-яІіЇїЄєҐґ]){re.escape(src)}(?![A-Za-zА-Яа-яІіЇїЄєҐґ])", dst, result, flags=re.IGNORECASE)
+
+        # Частые хвосты после regex-замен.
+        result = result.replace(" к ", " до ")
+        result = result.replace(" по ", " за ")
+        result = re.sub(r"\s+", " ", result).strip()
         return result
 
     if lang == "en":
@@ -480,6 +553,8 @@ def localize_free_text(text: str, lang: str) -> str:
             return "away side is closer"
         if "гол" in low:
             return "goal market looks safer"
+        if "побед" in low or "перемог" in low:
+            return "closer to winning"
         return "market is safer than match winner"
 
     if lang == "ru":

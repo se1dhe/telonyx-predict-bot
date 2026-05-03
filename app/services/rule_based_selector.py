@@ -89,16 +89,16 @@ def build_pick(ctx: CandidateContext) -> AiPick:
         bet_label = f"{ctx.home_team} не програє"
         safe_label = f"{ctx.home_team} не програє"
         risky_label = f"{ctx.home_team} DNB"
-        predicted_winner = f"{ctx.home_team} ближе к победе, но безопаснее через 1X"
-        who_should_score = f"{ctx.home_team} должен забить минимум один"
+        predicted_winner = f"{ctx.home_team} ближче до перемоги, но безпечніше через 1X"
+        who_should_score = f"{ctx.home_team} має забити минимум один"
         risk = "низький"
     elif strength_diff <= -0.75:
         bet_code = "AWAY_DOUBLE_CHANCE"
         bet_label = f"{ctx.away_team} не програє"
         safe_label = f"{ctx.away_team} не програє"
         risky_label = f"{ctx.away_team} DNB"
-        predicted_winner = f"{ctx.away_team} ближе к победе, но безопаснее через X2"
-        who_should_score = f"{ctx.away_team} должен забить минимум один"
+        predicted_winner = f"{ctx.away_team} ближче до перемоги, но безпечніше через X2"
+        who_should_score = f"{ctx.away_team} має забити минимум один"
         risk = "низький"
 
     if bet_code == "HOME_DOUBLE_CHANCE" and over15_rate >= 0.62:
