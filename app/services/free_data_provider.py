@@ -579,6 +579,28 @@ class FreeDataProvider:
 
 
 
+
+def football_data_season_code(target_date: date) -> str:
+    """Вернуть код сезона для football-data.co.uk.
+
+    Пример:
+    - 2025-08-01 ... 2026-07-31 -> "2526"
+    - 2026-08-01 ... 2027-07-31 -> "2627"
+
+    В европейском футболе новый сезон обычно начинается летом.
+    Для наших источников достаточно считать границей 1 июля.
+    """
+    year = target_date.year
+    if target_date.month >= 7:
+        start_year = year
+        end_year = year + 1
+    else:
+        start_year = year - 1
+        end_year = year
+
+    return f"{start_year % 100:02d}{end_year % 100:02d}"
+
+
 def fixture_sort_key(fixture: object) -> int:
     """Ключ сортировки LOCAL-матчей по времени старта.
 
