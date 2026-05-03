@@ -28,6 +28,18 @@ async def send_daily_gold_matches(bot: Bot) -> None:
         await safe_send_html(bot, settings.telegram_target_chat_id, summary)
         for detail in details:
             await safe_send_html(bot, settings.telegram_target_chat_id, detail[:3850] + "\n\n..." if len(detail) > 3900 else detail)
+    except asyncio.TimeoutError:
+        logger.exception("Pipeline завис дольше разрешённого времени")
+        await bot.send_message(
+            chat_id=settings.telegram_target_chat_id,
+            text=(
+                "⚠️ Сбор прогнозов остановлен по таймауту.\n\n"
+                "Бот не упал, но внешний источник или AI отвечал слишком долго. "
+                "Подробности записаны в Railway Logs."
+            ),
+            parse_mode=None,
+            disable_web_page_preview=True,
+        )
     except Exception:
         logger.exception("Ошибка при сборе прогнозов")
         logger.error("Полный traceback:\n%s", traceback.format_exc())

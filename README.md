@@ -56,3 +56,25 @@ ESPN_LEAGUES=eng.1,esp.1,ita.1,ger.1,fra.1,ned.1,por.1,sco.1
 - TheSportsDB fixtures
 - ESPN fixtures
 - Использованный fallback
+
+
+## V4: защита от зависаний
+
+Добавлены:
+- подробные логи по этапам pipeline;
+- короткие HTTP timeout для бесплатных источников;
+- SerpAPI timeout;
+- общий pipeline timeout;
+- новости ищутся только для финальных кандидатов, а не для всех матчей.
+
+Рекомендуемые тестовые переменные:
+```env
+MATCHES_PER_DAY=3
+MIN_AI_CONFIDENCE=25
+MAX_RAW_EVENTS=8
+MAX_CANDIDATES_FOR_AI=4
+LOCAL_LOOKAHEAD_DAYS=1
+PIPELINE_TIMEOUT_SECONDS=180
+HTTP_TIMEOUT_SECONDS=12
+NEWS_TIMEOUT_SECONDS=8
+```

@@ -2,16 +2,18 @@ from __future__ import annotations
 
 import csv
 import io
+import logging
 import re
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from typing import Any
 
 import aiohttp
-from tenacity import retry, stop_after_attempt, wait_exponential
-
 from app.config import get_settings
 from app.schemas import CandidateContext, TeamMetrics
+
+logger = logging.getLogger(__name__)
+
 from app.services.api_football import calculate_data_quality, calculate_pre_ai_score, detect_rejection_risks
 
 
@@ -92,14 +94,12 @@ class FreeDataProvider:
         self._elo_cache: dict[str, int] = {}
         self.last_debug: dict[str, Any] = {}
 
-    @retry(
-        stop=stop_after_attempt(3),
-        wait=wait_exponential(multiplier=1, min=1, max=6),
-        reraise=True,
-    )
     async def fetch_text(self, url: str) -> str:
-        """Скачать текстовый файл."""
-        timeout = aiohttp.ClientTimeout(total=30)
+        """Скачать текстовый файл без долгих повторов.
+
+        В Railway лучше быстро получить ошибку, чем зависнуть на 5–10 минут.
+        """
+        timeout = aiohttp.ClientTimeout(total=self.settings.http_timeout_seconds)
         headers = {"User-Agent": "Mozilla/5.0 FootballGoldBot/1.0"}
         async with aiohttp.ClientSession(timeout=timeout, headers=headers) as session:
             async with session.get(url) as response:
@@ -108,14 +108,9 @@ class FreeDataProvider:
                     raise RuntimeError(f"LOCAL HTTP {response.status} for {url}: {text[:300]}")
                 return text
 
-    @retry(
-        stop=stop_after_attempt(3),
-        wait=wait_exponential(multiplier=1, min=1, max=6),
-        reraise=True,
-    )
     async def fetch_json(self, url: str) -> dict[str, Any]:
-        """Скачать JSON."""
-        timeout = aiohttp.ClientTimeout(total=30)
+        """Скачать JSON без долгих повторов."""
+        timeout = aiohttp.ClientTimeout(total=self.settings.http_timeout_seconds)
         headers = {"User-Agent": "Mozilla/5.0 FootballGoldBot/1.0"}
         async with aiohttp.ClientSession(timeout=timeout, headers=headers) as session:
             async with session.get(url) as response:
@@ -134,8 +129,10 @@ class FreeDataProvider:
             "fallback_errors": [],
         }
 
+        logger.info("LOCAL: получаю fixtures из football-data.co.uk")
         fixtures = await self._fixtures_from_football_data(target_date)
         self.last_debug["football_data_fixtures"] = len(fixtures)
+        logger.info("LOCAL: football-data.co.uk вернул матчей: %s", len(fixtures))
 
         if fixtures:
             self.last_debug["used_source"] = "football-data.co.uk"
@@ -143,8 +140,10 @@ class FreeDataProvider:
 
         if self.settings.thesportsdb_enabled:
             try:
+                logger.info("LOCAL: football-data пустой, пробую TheSportsDB")
                 fixtures = await self._fixtures_from_thesportsdb(target_date)
                 self.last_debug["thesportsdb_fixtures"] = len(fixtures)
+                logger.info("LOCAL: TheSportsDB вернул матчей: %s", len(fixtures))
             except Exception as exc:
                 self.last_debug["fallback_errors"].append(f"TheSportsDB: {str(exc)[:180]}")
                 fixtures = []
@@ -155,8 +154,10 @@ class FreeDataProvider:
 
         if self.settings.espn_enabled:
             try:
+                logger.info("LOCAL: TheSportsDB пустой, пробую ESPN scoreboard")
                 fixtures = await self._fixtures_from_espn(target_date)
                 self.last_debug["espn_fixtures"] = len(fixtures)
+                logger.info("LOCAL: ESPN вернул матчей: %s", len(fixtures))
             except Exception as exc:
                 self.last_debug["fallback_errors"].append(f"ESPN: {str(exc)[:180]}")
                 fixtures = []

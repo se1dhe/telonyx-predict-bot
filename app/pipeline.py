@@ -36,7 +36,9 @@ class DailyPipeline:
                 return cached
         debug = [f"📅 Дата: {date_key}", f"🧩 Источник: {provider_name}"]
         try:
+            logger.info("Pipeline: получаю матчи от источника %s на дату %s", provider_name, date_key)
             raw_fixtures = await self.provider.fixtures_by_date(target_date)
+            logger.info("Pipeline: источник вернул матчей: %s", len(raw_fixtures))
         except Exception as exc:
             summary = f"⚠️ Не удалось получить матчи из источника {provider_name}.\n\nОшибка: <code>{escape(str(exc)[:1000])}</code>"
             await self._save_daily_run(date_key, summary, 0)
@@ -71,7 +73,9 @@ class DailyPipeline:
             await self._save_daily_run(date_key, summary, 0)
             return summary, []
         try:
+            logger.info("Pipeline: отправляю %s кандидатов в OpenAI", len(contexts))
             ai_response = await self.ai.select_gold_matches(contexts)
+            logger.info("Pipeline: OpenAI вернул выбранных матчей: %s", len(ai_response.selected))
         except Exception as exc:
             summary = "⚠️ AI не смог выбрать матчи.\n\n<b>Диагностика:</b>\n" + "\n".join(debug) + f"\n\n<b>Ошибка AI:</b>\n<code>{escape(str(exc)[:1000])}</code>"
             await self._save_daily_run(date_key, summary, 0)

@@ -30,6 +30,9 @@ class Settings(BaseSettings):
     local_lookahead_days: int = Field(1, alias="LOCAL_LOOKAHEAD_DAYS")
     local_min_form_matches: int = Field(4, alias="LOCAL_MIN_FORM_MATCHES")
     clubelo_enabled: bool = Field(True, alias="CLUBELO_ENABLED")
+    pipeline_timeout_seconds: int = Field(180, alias="PIPELINE_TIMEOUT_SECONDS")
+    http_timeout_seconds: int = Field(12, alias="HTTP_TIMEOUT_SECONDS")
+    news_timeout_seconds: int = Field(8, alias="NEWS_TIMEOUT_SECONDS")
 
     thesportsdb_enabled: bool = Field(True, alias="THESPORTSDB_ENABLED")
     thesportsdb_api_key: str = Field("1", alias="THESPORTSDB_API_KEY")
