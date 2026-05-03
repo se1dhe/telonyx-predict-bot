@@ -578,6 +578,35 @@ class FreeDataProvider:
         return None
 
 
+
+def fixture_sort_key(fixture: object) -> int:
+    """Ключ сортировки LOCAL-матчей по времени старта.
+
+    Исправляет падение v34/v35, где free_data_provider использовал fixture_sort_key,
+    но функция была объявлена только в pipeline.py и не была видна здесь.
+    """
+    try:
+        timestamp = getattr(fixture, "timestamp", None)
+        if timestamp:
+            return int(timestamp)
+
+        fixture_date = getattr(fixture, "date", None)
+        fixture_time = str(getattr(fixture, "time", "") or "23:59")
+
+        if fixture_date:
+            hh, mm = 23, 59
+            if len(fixture_time) >= 5 and ":" in fixture_time:
+                raw_hh, raw_mm = fixture_time[:5].split(":", 1)
+                hh, mm = int(raw_hh), int(raw_mm)
+
+            return int(f"{fixture_date.strftime('%Y%m%d')}{hh:02d}{mm:02d}")
+
+    except Exception:
+        pass
+
+    return 999999999999
+
+
 def parse_football_data_date(value: str) -> date | None:
     """Разобрать дату football-data.co.uk."""
     value = value.strip()

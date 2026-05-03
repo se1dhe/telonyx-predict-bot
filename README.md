@@ -773,3 +773,12 @@ RESULT_CHECK_INTERVAL_MINUTES="15"
 - Убрана ошибка `name 'fixture_sort_key' is not defined` в LOCAL pipeline.
 - Добавлен совместимый alias `fixture_sort_key -> fixture_sort_timestamp`, чтобы старые вызовы не ломали сбор прогнозов.
 
+
+
+## v36: definitive LOCAL fixture_sort_key fix
+
+Исправлено:
+
+- Ошибка `name 'fixture_sort_key' is not defined` была в `app/services/free_data_provider.py`, а не только в `pipeline.py`.
+- Добавлена локальная функция `fixture_sort_key()` прямо в `free_data_provider.py`, где она используется при сортировке LOCAL fixtures.
+
