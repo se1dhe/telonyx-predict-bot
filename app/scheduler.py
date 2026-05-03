@@ -12,6 +12,7 @@ from app.config import get_settings
 from app.pipeline import DailyPipeline
 from app.result_checker import ResultChecker
 from app.services.channel_render import private_summary, public_summary_from_private
+from app.services.channel_buttons import public_channel_cta_keyboard
 from app.services.subscription_guard import check_subscriptions
 
 
@@ -25,6 +26,7 @@ async def safe_send_html(
     chat_id: str,
     text: str,
     disable_web_page_preview: bool = True,
+    reply_markup: dict | None = None,
 ) -> None:
     """Безопасно отправить HTML в Telegram."""
     try:
@@ -33,6 +35,7 @@ async def safe_send_html(
             text=text,
             parse_mode=ParseMode.HTML,
             disable_web_page_preview=disable_web_page_preview,
+            reply_markup=reply_markup,
         )
     except Exception:
         logger.exception("Не удалось отправить HTML-сообщение в Telegram")
@@ -87,14 +90,22 @@ async def send_daily_gold_matches(bot: Bot) -> None:
                     )
 
             # Открытый канал: только самый сильный матч дня.
+            public_reply_markup = public_channel_cta_keyboard()
+
             if details:
                 await safe_send_html(
                     bot,
                     public_chat,
                     public_summary_from_private(summary, details[0][:3400]),
+                    reply_markup=public_reply_markup,
                 )
             else:
-                await safe_send_html(bot, public_chat, public_summary_from_private(summary, None))
+                await safe_send_html(
+                    bot,
+                    public_chat,
+                    public_summary_from_private(summary, None),
+                    reply_markup=public_reply_markup,
+                )
 
     except asyncio.TimeoutError:
         logger.exception("Pipeline завис дольше разрешённого времени")

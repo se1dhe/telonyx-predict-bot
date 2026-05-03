@@ -644,3 +644,19 @@ PAYKASSA_ENDPOINT=https://paykassa.pro/sci/0.3/index.php
 - добавлен `PAYKASSA_ENDPOINT`;
 - headers сделаны ближе к обычному form/curl запросу;
 - при 403 бот пишет более полезную диагностику в Railway Logs.
+
+
+## V28: зелёная CTA-кнопка под постами в открытом канале
+
+Добавлено:
+- под каждым постом в `TELEGRAM_PUBLIC_CHANNEL` появляется зелёная кнопка:
+  `🔒 Получить VIP доступ / Get VIP access`;
+- кнопка ведёт в Telegram-бота:
+  `https://t.me/{TELEGRAM_BOT_USERNAME}?start=vip`;
+- приватный канал кнопки не получает — там остаются полные VIP-прогнозы.
+
+Новые переменные:
+```env
+TELEGRAM_BOT_USERNAME=telonyx_predict_bot
+PUBLIC_CHANNEL_CTA_ENABLED=true
+```

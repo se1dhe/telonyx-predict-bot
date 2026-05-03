@@ -12,6 +12,8 @@ class Settings(BaseSettings):
 
     telegram_private_channel_id: str = Field("", alias="TELEGRAM_PRIVATE_CHANNEL_ID")
     telegram_public_channel: str = Field("@telonyx_predict", alias="TELEGRAM_PUBLIC_CHANNEL")
+    telegram_bot_username: str = Field("telonyx_predict_bot", alias="TELEGRAM_BOT_USERNAME")
+    public_channel_cta_enabled: bool = Field(True, alias="PUBLIC_CHANNEL_CTA_ENABLED")
     project_public_url: str = Field("https://predict.telonyx.app", alias="PROJECT_PUBLIC_URL")
 
     price_1_day_usdt: float = Field(2.99, alias="PRICE_1_DAY_USDT")
