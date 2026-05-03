@@ -874,3 +874,22 @@ DATABASE_URL="${{Postgres.DATABASE_URL}}"
 - После старта в Railway Logs должна появиться строка вида:
   `DB init complete. PostgreSQL public tables: [...]`.
 
+
+
+## v43: PostgreSQL DATABASE_URL Railway fallback
+
+Исправлено:
+
+- Если `DATABASE_URL` задан как буквальный `${{Postgres.DATABASE_URL}}` и Railway reference не развернулся, бот больше не падает с непонятной SQLAlchemy ошибкой.
+- Добавлено понятное сообщение, что reference variable указывает на неправильное имя Postgres service.
+- Добавлен fallback на `DATABASE_PUBLIC_URL`, `POSTGRES_URL`, `POSTGRES_DATABASE_URL`.
+- Добавлен fallback на отдельные переменные `PGHOST`, `PGPORT`, `PGUSER`, `PGPASSWORD`, `PGDATABASE`.
+
+Правильный вариант для Railway:
+
+```env
+DATABASE_URL=${{Postgres.DATABASE_URL}}
+```
+
+Важно: `Postgres` должен быть точным названием PostgreSQL service в Railway.
+

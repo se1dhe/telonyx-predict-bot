@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 import logging
+import os
+from urllib.parse import quote_plus
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
@@ -13,20 +15,65 @@ settings = get_settings()
 logger = logging.getLogger(__name__)
 
 
+def build_postgres_url_from_parts() -> str:
+    """Собрать Postgres URL из отдельных Railway/PG переменных.
+
+    Это fallback на случай, если DATABASE_URL в Railway задан неверно
+    или reference variable не развернулась.
+    """
+    host = os.getenv("PGHOST") or os.getenv("POSTGRES_HOST")
+    port = os.getenv("PGPORT") or os.getenv("POSTGRES_PORT") or "5432"
+    user = os.getenv("PGUSER") or os.getenv("POSTGRES_USER")
+    password = os.getenv("PGPASSWORD") or os.getenv("POSTGRES_PASSWORD")
+    database = os.getenv("PGDATABASE") or os.getenv("POSTGRES_DB") or os.getenv("POSTGRES_DATABASE")
+
+    if not all([host, user, password, database]):
+        return ""
+
+    return (
+        "postgresql+asyncpg://"
+        f"{quote_plus(user)}:{quote_plus(password)}@{host}:{port}/{database}"
+    )
+
+
 def normalize_database_url(raw_url: str) -> str:
     """Подготовить DATABASE_URL для SQLAlchemy async engine.
 
-    Railway/Postgres часто отдаёт URL в одном из форматов:
+    Поддерживаются:
+    - postgresql+asyncpg://user:pass@host:port/db
     - postgresql://user:pass@host:port/db
     - postgres://user:pass@host:port/db
-
-    Для async SQLAlchemy нужен драйвер asyncpg:
-    - postgresql+asyncpg://user:pass@host:port/db
-
-    SQLite оставляем как есть:
     - sqlite+aiosqlite:///./data/bot.db
+
+    Если Railway reference variable не развернулась и пришло буквальное
+    `${{Postgres.DATABASE_URL}}`, пробуем DATABASE_PUBLIC_URL/POSTGRES_URL
+    и затем отдельные PGHOST/PGUSER/PGPASSWORD/PGDATABASE.
     """
-    value = (raw_url or "").strip()
+    value = (raw_url or "").strip().strip('"').strip("'")
+
+    # Частая ошибка: в Railway указан reference на несуществующее имя сервиса,
+    # и приложение получает буквальную строку `${{Postgres.DATABASE_URL}}`.
+    if not value or value.startswith("${{") or value.startswith("$"):
+        fallback = (
+            os.getenv("DATABASE_PUBLIC_URL")
+            or os.getenv("POSTGRES_URL")
+            or os.getenv("POSTGRES_DATABASE_URL")
+            or build_postgres_url_from_parts()
+        )
+
+        if fallback:
+            logger.warning(
+                "DATABASE_URL не является готовым URL, использую fallback из Railway/Postgres переменных"
+            )
+            value = fallback.strip().strip('"').strip("'")
+        else:
+            raise RuntimeError(
+                "DATABASE_URL задан неверно или Railway reference не развернулся. "
+                "В Railway variables для сервиса бота укажи DATABASE_URL как reference на реальную "
+                "переменную Postgres service, например ${{Postgres.DATABASE_URL}}, "
+                "где Postgres — точное имя твоего Postgres service. "
+                "Альтернатива: задай PGHOST, PGPORT, PGUSER, PGPASSWORD, PGDATABASE."
+            )
 
     if value.startswith("postgresql+asyncpg://"):
         return value
@@ -37,7 +84,14 @@ def normalize_database_url(raw_url: str) -> str:
     if value.startswith("postgres://"):
         return value.replace("postgres://", "postgresql+asyncpg://", 1)
 
-    return value
+    if value.startswith("sqlite+aiosqlite://"):
+        return value
+
+    raise RuntimeError(
+        "DATABASE_URL имеет неподдерживаемый формат. "
+        "Нужен postgresql://, postgres://, postgresql+asyncpg:// или sqlite+aiosqlite://. "
+        f"Текущее начало значения: {value[:32]!r}"
+    )
 
 
 DATABASE_URL = normalize_database_url(settings.database_url)
@@ -53,8 +107,6 @@ engine_kwargs = {
     "pool_pre_ping": True,
 }
 
-# Для SQLite пул не настраиваем; для Postgres можно держать маленький пул,
-# чтобы Railway hobby/free не упирался в лишние подключения.
 if IS_POSTGRES:
     engine_kwargs.update(
         {
@@ -92,12 +144,7 @@ async def init_db() -> None:
 
 
 async def ensure_runtime_columns(conn) -> None:
-    """Мини-миграции без Alembic.
-
-    create_all не добавляет новые колонки в уже существующие таблицы.
-    Поэтому добавляем runtime-поля вручную и игнорируем ошибку,
-    если колонка уже существует.
-    """
+    """Мини-миграции без Alembic."""
     columns = {
         "notified_24h_at": "DATETIME",
         "notified_5h_at": "DATETIME",
@@ -112,5 +159,4 @@ async def ensure_runtime_columns(conn) -> None:
             else:
                 await conn.execute(text(f"ALTER TABLE bot_users ADD COLUMN IF NOT EXISTS {name} TIMESTAMP"))
         except Exception:
-            # Колонка уже существует или таблицы ещё нет в старом окружении.
             pass
