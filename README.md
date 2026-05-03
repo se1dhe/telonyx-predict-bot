@@ -244,3 +244,25 @@ BOOKMAKER_LINK_ENABLED=true
 BOOKMAKER_NAME=Pinnacle
 BOOKMAKER_SEARCH_URL_TEMPLATE=https://www.pinnacle.com/en/search?s={query}
 ```
+
+
+## V13: замена Pinnacle на рабочие ссылки букмекеров с тоталами
+
+Pinnacle search заменён, потому что ссылка не открывалась стабильно.
+
+Новая схема:
+- основной букмекер: DraftKings Soccer;
+- резерв 1: BetMGM Soccer;
+- резерв 2: Favbet Sport;
+- в сообщении добавлена подсказка: искать `Total Goals / Over-Under / Тотал голов`.
+
+Новые/обновлённые переменные:
+
+```env
+BOOKMAKER_LINK_ENABLED=true
+BOOKMAKER_NAME=DraftKings
+BOOKMAKER_SEARCH_URL_TEMPLATE=https://sportsbook.draftkings.com/sports/soccer
+BOOKMAKER_BACKUP_LINKS_ENABLED=true
+BOOKMAKER_BACKUP_LINKS=BetMGM|https://www.betmgm.com/en/sports/soccer-4/betting;Favbet|https://www.favbet.ua/uk/sports
+BOOKMAKER_MARKET_HINT=Ищи рынок: Total Goals / Over-Under / Тотал голов
+```

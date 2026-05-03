@@ -8,11 +8,10 @@ from app.schemas import AiPick, CandidateContext
 
 
 def bookmaker_url(match_title: str) -> str:
-    """Ссылка на поиск матча в букмекере.
+    """Ссылка на линию букмекера.
 
-    Для Pinnacle точный deeplink на событие нельзя гарантировать без официальной настройки.
-    Поэтому по умолчанию используется поиск по названию матча.
-    Шаблон можно заменить через BOOKMAKER_SEARCH_URL_TEMPLATE.
+    В v13 основной вариант — не сломанный поиск Pinnacle, а стабильная страница футбольной линии.
+    Для тоталов пользователю надо открыть футбол → матч → рынок Total Goals / Over-Under.
     """
     settings = get_settings()
     query = quote_plus(str(match_title))
@@ -27,15 +26,53 @@ def bookmaker_url(match_title: str) -> str:
     )
 
 
+def parse_backup_bookmaker_links() -> list[tuple[str, str]]:
+    """Разобрать резервные ссылки букмекеров из env.
+
+    Формат:
+    BetMGM|https://...;Favbet|https://...
+    """
+    settings = get_settings()
+    if not settings.bookmaker_backup_links_enabled:
+        return []
+
+    result: list[tuple[str, str]] = []
+    raw = settings.bookmaker_backup_links.strip()
+    if not raw:
+        return result
+
+    for item in raw.split(";"):
+        item = item.strip()
+        if not item or "|" not in item:
+            continue
+
+        name, url = item.split("|", 1)
+        name = name.strip()
+        url = url.strip()
+
+        if name and url:
+            result.append((name, url))
+
+    return result
+
+
 def bookmaker_link_line(match_title: str) -> str:
-    """HTML-строка ссылки на линию букмекера."""
+    """HTML-блок ссылок на букмекеров."""
     settings = get_settings()
     if not settings.bookmaker_link_enabled:
         return ""
 
-    url = bookmaker_url(match_title)
-    name = html_escape(settings.bookmaker_name)
-    return f"💸 <a href=\"{html_escape(url)}\">Открыть линию {name}</a>"
+    lines = [
+        f"💸 <a href=\"{html_escape(bookmaker_url(match_title))}\">Открыть линию {html_escape(settings.bookmaker_name)}</a>"
+    ]
+
+    for name, url in parse_backup_bookmaker_links():
+        lines.append(f"↪️ <a href=\"{html_escape(url)}\">Резерв: {html_escape(name)}</a>")
+
+    if settings.bookmaker_market_hint:
+        lines.append(f"📌 {html_escape(settings.bookmaker_market_hint)}")
+
+    return "\n".join(lines)
 
 
 def html_escape(value: object) -> str:
