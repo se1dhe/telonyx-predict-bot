@@ -61,7 +61,7 @@ def build_pick(ctx: CandidateContext) -> AiPick:
     bet_label = "ТБ 1.5"
     safe_label = "ТБ 1.5"
     risky_label = "ТБ 2.5"
-    predicted_winner = "Исход лучше не трогать"
+    predicted_winner = "Результат краще не чіпати"
     who_should_score = "Обережніше через загальний тотал"
     risk = "середній"
 
@@ -122,28 +122,28 @@ def build_pick(ctx: CandidateContext) -> AiPick:
         a_concede_avg,
     )
 
-    if predicted_winner == "Исход лучше не трогать":
+    if predicted_winner == "Результат краще не чіпати":
         if expected_home > expected_away:
-            predicted_winner = f"{ctx.home_team} чуть ближе, но безопаснее через тотал"
+            predicted_winner = f"{ctx.home_team} трохи ближче, але безпечніше через тотал"
         elif expected_away > expected_home:
-            predicted_winner = f"{ctx.away_team} чуть ближе, но безопаснее через тотал"
+            predicted_winner = f"{ctx.away_team} трохи ближче, але безпечніше через тотал"
         else:
-            predicted_winner = "Матч выглядит равным, безопаснее рынок голов"
+            predicted_winner = "Матч виглядає рівним, безпечніший ринок голів"
 
     if who_should_score == "Обережніше через загальний тотал":
         if h_goal_avg >= a_goal_avg:
-            who_should_score = f"{ctx.home_team} выглядит вероятнее по голу, но ставка лучше через общий рынок"
+            who_should_score = f"{ctx.home_team} виглядає ймовірніше за голом, але ставка краще через загальний ринок"
         else:
-            who_should_score = f"{ctx.away_team} выглядит вероятнее по голу, но ставка лучше через общий рынок"
+            who_should_score = f"{ctx.away_team} виглядає ймовірніше за голом, але ставка краще через загальний ринок"
 
     warnings = list(ctx.rejection_risks)
 
     reasoning = (
-        f"Форма {ctx.home_team}: {h.wins}-{h.draws}-{h.losses}, голы {h.goals_for}:{h.goals_against}, "
+        f"Форма {ctx.home_team}: {h.wins}-{h.draws}-{h.losses}, голи {h.goals_for}:{h.goals_against}, "
         f"ТБ1.5 {h.over15}/{max(1, h.matches)}, ОЗ {h.btts}/{max(1, h.matches)}. "
-        f"Форма {ctx.away_team}: {a.wins}-{a.draws}-{a.losses}, голы {a.goals_for}:{a.goals_against}, "
+        f"Форма {ctx.away_team}: {a.wins}-{a.draws}-{a.losses}, голи {a.goals_for}:{a.goals_against}, "
         f"ТБ1.5 {a.over15}/{max(1, a.matches)}, ОЗ {a.btts}/{max(1, a.matches)}. "
-        f"Общий фон: ТБ1.5 {int(over15_rate * 100)}%, ТБ2.5 {int(over25_rate * 100)}%, ОЗ {int(btts_rate * 100)}%."
+        f"Загальний фон: ТБ1.5 {int(over15_rate * 100)}%, ТБ2.5 {int(over25_rate * 100)}%, ОЗ {int(btts_rate * 100)}%."
     )
 
     if h.elo and a.elo:
@@ -163,8 +163,8 @@ def build_pick(ctx: CandidateContext) -> AiPick:
         confidence=confidence,
         expected_score=f"{expected_home}:{expected_away}",
         why_this_match_is_gold=(
-            f"Матч прошёл локальный фильтр: pre_ai={ctx.pre_ai_score}, "
-            f"data_quality={ctx.data_quality_score}, есть статистическая база по форме и голевым трендам."
+            f"Матч пройшов локальний фільтр: pre_ai={ctx.pre_ai_score}, "
+            f"data_quality={ctx.data_quality_score}, є статистична база за формою та гольовими трендами."
         ),
         reasoning=reasoning,
         data_warnings=warnings[:5],
@@ -228,7 +228,7 @@ def expected_score(
 
 
 def round_to_score(value: float) -> int:
-    """Округлить ожидаемые голы в реалистичный счёт."""
+    """Округлить ожидаемые голи в реалистичный счёт."""
     if value < 0.65:
         return 0
     if value < 1.45:
