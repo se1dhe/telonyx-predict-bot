@@ -34,7 +34,9 @@ async def main() -> None:
     setup_scheduler(bot)
 
     if settings.run_on_start:
-        await send_daily_gold_matches(bot)
+        # Важно: не await.
+        # Иначе бот не отвечает на /start и кнопки, пока идёт тяжёлый сбор матчей.
+        asyncio.create_task(send_daily_gold_matches(bot))
 
     logging.info(
         "TelOnyx Predict Bot запущен. DATA_PROVIDER=%s, public=%s, private=%s",

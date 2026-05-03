@@ -596,3 +596,29 @@ PayKassa вернула не JSON, а HTML/текст. Такое обычно �
 PayKassa create_order request payload
 PayKassa create_order HTTP response
 ```
+
+
+## V26: бот отвечает во время сбора матчей
+
+Исправлена проблема:
+при `RUN_ON_START=true` приложение делало:
+
+```python
+await send_daily_gold_matches(bot)
+await dp.start_polling(bot)
+```
+
+Из-за этого polling не стартовал, пока бот собирал/анализировал матчи.
+Пользователь видел, что контейнер работает, но `/start` и кнопки не отвечали.
+
+Теперь:
+```python
+asyncio.create_task(send_daily_gold_matches(bot))
+await dp.start_polling(bot)
+```
+
+То есть:
+- сбор прогнозов идёт в фоне;
+- Telegram polling стартует сразу;
+- бот отвечает на команды и кнопки во время анализа;
+- добавлен `pipeline_lock`, чтобы тяжёлый сбор не запускался параллельно два раза.

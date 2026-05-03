@@ -17,6 +17,8 @@ from app.services.subscription_guard import check_subscriptions
 
 logger = logging.getLogger(__name__)
 
+pipeline_lock = asyncio.Lock()
+
 
 async def safe_send_html(
     bot: Bot,
@@ -49,44 +51,50 @@ async def safe_send_html(
 async def send_daily_gold_matches(bot: Bot) -> None:
     """Ежедневный запуск прогнозов.
 
-    Логика каналов:
-    - приватный канал получает все найденные матчи;
-    - открытый канал получает только первый/самый сильный матч.
+    Задача может идти долго, поэтому:
+    - она запускается в фоне из main.py;
+    - polling стартует сразу;
+    - lock не даёт запустить два сбора одновременно.
     """
     settings = get_settings()
 
+    if pipeline_lock.locked():
+        logger.warning("Сбор прогнозов уже выполняется, повторный запуск пропущен")
+        return
+
     try:
-        logger.info("Запускаю ежедневный сбор прогнозов")
-        summary, details = await asyncio.wait_for(
-            DailyPipeline().run_for_today(force=True),
-            timeout=settings.pipeline_timeout_seconds,
-        )
+        async with pipeline_lock:
+            logger.info("Запускаю ежедневный сбор прогнозов")
+            summary, details = await asyncio.wait_for(
+                DailyPipeline().run_for_today(force=True),
+                timeout=settings.pipeline_timeout_seconds,
+            )
 
-        logger.info("Сводка собрана. Детальных прогнозов: %s", len(details))
+            logger.info("Сводка собрана. Детальных прогнозов: %s", len(details))
 
-        private_chat = settings.telegram_private_channel_id
-        public_chat = settings.telegram_public_channel
+            private_chat = settings.telegram_private_channel_id
+            public_chat = settings.telegram_public_channel
 
-        # Приватный канал: полная сводка + все карточки.
-        await safe_send_html(bot, private_chat, private_summary(summary))
+            # Приватный канал: полная сводка + все карточки.
+            await safe_send_html(bot, private_chat, private_summary(summary))
 
-        if settings.show_detailed_picks:
-            for detail in details:
+            if settings.show_detailed_picks:
+                for detail in details:
+                    await safe_send_html(
+                        bot,
+                        private_chat,
+                        detail[:3850] + "\n\n..." if len(detail) > 3900 else detail,
+                    )
+
+            # Открытый канал: только самый сильный матч дня.
+            if details:
                 await safe_send_html(
                     bot,
-                    private_chat,
-                    detail[:3850] + "\n\n..." if len(detail) > 3900 else detail,
+                    public_chat,
+                    public_summary_from_private(summary, details[0][:3400]),
                 )
-
-        # Открытый канал: только самый сильный матч дня.
-        if details:
-            await safe_send_html(
-                bot,
-                public_chat,
-                public_summary_from_private(summary, details[0][:3400]),
-            )
-        else:
-            await safe_send_html(bot, public_chat, public_summary_from_private(summary, None))
+            else:
+                await safe_send_html(bot, public_chat, public_summary_from_private(summary, None))
 
     except asyncio.TimeoutError:
         logger.exception("Pipeline завис дольше разрешённого времени")
