@@ -266,3 +266,39 @@ BOOKMAKER_BACKUP_LINKS_ENABLED=true
 BOOKMAKER_BACKUP_LINKS=BetMGM|https://www.betmgm.com/en/sports/soccer-4/betting;Favbet|https://www.favbet.ua/uk/sports
 BOOKMAKER_MARKET_HINT=Ищи рынок: Total Goals / Over-Under / Тотал голов
 ```
+
+
+## V14: API-FOOTBALL free plan fix
+
+Исправлена ошибка:
+
+```text
+Free plans do not have access to the Last parameter.
+```
+
+В free plan нельзя использовать:
+
+```text
+/fixtures?team=TEAM_ID&last=8
+```
+
+Теперь при:
+
+```env
+APIFOOTBALL_FREE_PLAN=true
+```
+
+бот использует:
+
+```text
+/fixtures?team=TEAM_ID&season=2025
+```
+
+и берёт последние завершённые матчи локально.
+
+Новые переменные:
+
+```env
+APIFOOTBALL_FREE_PLAN=true
+APIFOOTBALL_SEASON=2025
+```

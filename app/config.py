@@ -40,6 +40,8 @@ class Settings(BaseSettings):
     data_provider: str = Field("LOCAL", alias="DATA_PROVIDER")
     apifootball_key: str | None = Field(None, alias="APIFOOTBALL_KEY")
     apifootball_host: str = Field("v3.football.api-sports.io", alias="APIFOOTBALL_HOST")
+    apifootball_free_plan: bool = Field(True, alias="APIFOOTBALL_FREE_PLAN")
+    apifootball_season: int = Field(2025, alias="APIFOOTBALL_SEASON")
     local_league_codes_raw: str = Field("E0,E1,SP1,I1,D1,F1,N1,P1,SC0", alias="LOCAL_LEAGUE_CODES")
     local_lookahead_days: int = Field(1, alias="LOCAL_LOOKAHEAD_DAYS")
     local_min_form_matches: int = Field(4, alias="LOCAL_MIN_FORM_MATCHES")
