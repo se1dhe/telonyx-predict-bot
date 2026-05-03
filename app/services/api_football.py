@@ -446,3 +446,13 @@ def detect_risks(ctx: CandidateContext) -> list[str]:
         risks.append("Нет коэффициентов от источника")
 
     return risks
+
+
+
+def detect_rejection_risks(ctx: CandidateContext) -> list[str]:
+    """Совместимость со старым LOCAL provider.
+
+    В старом коде free_data_provider импортирует detect_rejection_risks.
+    В v14 функция была переименована в detect_risks, из-за этого контейнер падал на старте.
+    """
+    return detect_risks(ctx)

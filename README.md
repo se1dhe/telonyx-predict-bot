@@ -318,3 +318,24 @@ ImportError: cannot import name 'RawFixture' from 'app.schemas'
 Также исправлено:
 - `TeamMetrics` теперь можно создавать из API-FOOTBALL без обязательных `team_id/name`;
 - API_FOOTBALL фильтр теперь работает с `RawFixture` объектами, а не только со старыми dict.
+
+
+## V16: fix detect_rejection_risks import
+
+Исправлена ошибка старта контейнера:
+
+```text
+ImportError: cannot import name 'detect_rejection_risks' from 'app.services.api_football'
+```
+
+Причина:
+в `free_data_provider.py` остался импорт старой функции `detect_rejection_risks`,
+а в `api_football.py` после v14 функция называлась `detect_risks`.
+
+Исправление:
+добавлен совместимый alias:
+
+```python
+def detect_rejection_risks(ctx):
+    return detect_risks(ctx)
+```
