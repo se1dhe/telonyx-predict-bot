@@ -827,18 +827,17 @@ AI_FALLBACK_ON_ERROR="true"
 
 
 
-## v39: lookahead fallback for future matches
+## v40: today only + more match sources
 
-Исправлено/добавлено:
+Изменено:
 
-- Если бот запущен вечером и все сегодняшние матчи уже начались или завершились, он больше не публикует прошедшие матчи.
-- Добавлен автоматический поиск ближайших будущих матчей на следующие дни через `PREDICTION_LOOKAHEAD_DAYS`.
-- По умолчанию бот проверяет ещё 2 дня вперёд.
-- Прогнозы сохраняются с фактической датой матча, чтобы checker искал результат в правильный день.
-
-Новая переменная:
-
-```env
-PREDICTION_LOOKAHEAD_DAYS="2"
-```
+- Откат идеи lookahead: бот снова ищет только матчи на текущую дату запуска.
+- LOCAL provider теперь объединяет источники `football-data + TheSportsDB + ESPN`, а не останавливается на первом успешном источнике.
+- ESPN расширен дополнительными лигами: MLS, Brazil, Argentina, Mexico, Turkey, Belgium, а также вторые дивизионы England/Spain/Italy/Germany/France.
+- Исправлен ESPN fixture_id.
+- Для ESPN-only лиг history из football-data не валит pipeline, а возвращает пустую историю.
+- Добавлены настройки мягкого контекстного фильтра:
+  - `MIN_CONTEXT_DATA_QUALITY`
+  - `MIN_CONTEXT_PRE_AI_SCORE`
+- Рекомендуется увеличить `MAX_RAW_EVENTS` и `MAX_CANDIDATES_FOR_AI`, чтобы AI/локальный селектор видел больше матчей сегодняшнего дня.
 

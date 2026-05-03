@@ -82,10 +82,11 @@ class Settings(BaseSettings):
     matches_per_day: int = Field(5, alias="MATCHES_PER_DAY")
     min_ai_confidence: int = Field(45, alias="MIN_AI_CONFIDENCE")
     run_on_start: bool = Field(False, alias="RUN_ON_START")
-    max_raw_events: int = Field(10, alias="MAX_RAW_EVENTS")
-    max_candidates_for_ai: int = Field(5, alias="MAX_CANDIDATES_FOR_AI")
+    max_raw_events: int = Field(80, alias="MAX_RAW_EVENTS")
+    max_candidates_for_ai: int = Field(18, alias="MAX_CANDIDATES_FOR_AI")
     min_match_start_lead_minutes: int = Field(20, alias="MIN_MATCH_START_LEAD_MINUTES")
-    prediction_lookahead_days: int = Field(2, alias="PREDICTION_LOOKAHEAD_DAYS")
+    min_context_data_quality: int = Field(5, alias="MIN_CONTEXT_DATA_QUALITY")
+    min_context_pre_ai_score: int = Field(5, alias="MIN_CONTEXT_PRE_AI_SCORE")
     allowed_countries_raw: str = Field("", alias="ALLOWED_COUNTRIES")
     preferred_league_ids_raw: str = Field("", alias="PREFERRED_LEAGUE_IDS")
     data_provider: str = Field("LOCAL", alias="DATA_PROVIDER")
@@ -93,7 +94,7 @@ class Settings(BaseSettings):
     apifootball_host: str = Field("v3.football.api-sports.io", alias="APIFOOTBALL_HOST")
     apifootball_free_plan: bool = Field(True, alias="APIFOOTBALL_FREE_PLAN")
     apifootball_season: int = Field(2025, alias="APIFOOTBALL_SEASON")
-    local_league_codes_raw: str = Field("E0,E1,SP1,I1,D1,F1,N1,P1,SC0", alias="LOCAL_LEAGUE_CODES")
+    local_league_codes_raw: str = Field("E0,E1,E2,E3,SP1,SP2,I1,I2,D1,D2,F1,F2,N1,P1,SC0,MLS,BRA1,ARG1,MEX1,TUR1,BEL1", alias="LOCAL_LEAGUE_CODES")
     local_lookahead_days: int = Field(1, alias="LOCAL_LOOKAHEAD_DAYS")
     local_min_form_matches: int = Field(4, alias="LOCAL_MIN_FORM_MATCHES")
     clubelo_enabled: bool = Field(True, alias="CLUBELO_ENABLED")
@@ -105,7 +106,7 @@ class Settings(BaseSettings):
     thesportsdb_api_key: str = Field("1", alias="THESPORTSDB_API_KEY")
     thesportsdb_league_ids_raw: str = Field("4328,4335,4332,4331,4334,4337", alias="THESPORTSDB_LEAGUE_IDS")
     espn_enabled: bool = Field(True, alias="ESPN_ENABLED")
-    espn_leagues_raw: str = Field("eng.1,esp.1,ita.1,ger.1,fra.1,ned.1,por.1,sco.1", alias="ESPN_LEAGUES")
+    espn_leagues_raw: str = Field("eng.1,eng.2,esp.1,esp.2,ita.1,ita.2,ger.1,ger.2,fra.1,fra.2,ned.1,por.1,sco.1,usa.1,bra.1,arg.1,mex.1,tur.1,bel.1", alias="ESPN_LEAGUES")
 
     @property
     def supported_languages(self) -> List[str]:

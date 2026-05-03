@@ -33,6 +33,12 @@ LEAGUE_META: dict[str, dict[str, str]] = {
     "N1": {"name": "Eredivisie", "country": "Netherlands"},
     "P1": {"name": "Primeira Liga", "country": "Portugal"},
     "SC0": {"name": "Scottish Premiership", "country": "Scotland"},
+    "MLS": {"name": "Major League Soccer", "country": "USA"},
+    "BRA1": {"name": "Brasileirão Série A", "country": "Brazil"},
+    "ARG1": {"name": "Argentina Liga Profesional", "country": "Argentina"},
+    "MEX1": {"name": "Liga MX", "country": "Mexico"},
+    "TUR1": {"name": "Süper Lig", "country": "Turkey"},
+    "BEL1": {"name": "Belgian Pro League", "country": "Belgium"},
 }
 
 THESPORTSDB_TO_LOCAL: dict[str, str] = {
@@ -55,6 +61,12 @@ ESPN_TO_LOCAL: dict[str, str] = {
     "ned.1": "N1",
     "por.1": "P1",
     "sco.1": "SC0",
+    "usa.1": "MLS",
+    "bra.1": "BRA1",
+    "arg.1": "ARG1",
+    "mex.1": "MEX1",
+    "tur.1": "TUR1",
+    "bel.1": "BEL1",
 }
 
 
@@ -121,7 +133,14 @@ class FreeDataProvider:
                 return await response.json(content_type=None)
 
     async def fixtures_by_date(self, target_date: date) -> list[LocalFixture]:
-        """Получить матчи на дату и lookahead."""
+        """Получить матчи строго на указанную дату.
+
+        v40:
+        - только сегодняшний target_date, без lookahead;
+        - источники не заменяют друг друга, а объединяются;
+        - если TheSportsDB дал мало матчей, ESPN всё равно дополнительно проверяется;
+        - итог дедуплицируется и сортируется по времени.
+        """
         self.last_debug = {
             "football_data_fixtures": 0,
             "thesportsdb_fixtures": 0,
@@ -130,45 +149,57 @@ class FreeDataProvider:
             "fallback_errors": [],
         }
 
-        logger.info("LOCAL: получаю fixtures из football-data.co.uk")
-        fixtures = await self._fixtures_from_football_data(target_date)
-        self.last_debug["football_data_fixtures"] = len(fixtures)
-        logger.info("LOCAL: football-data.co.uk вернул матчей: %s", len(fixtures))
+        all_fixtures: list[LocalFixture] = []
 
-        if fixtures:
-            self.last_debug["used_source"] = "football-data.co.uk"
-            return deduplicate_fixtures(sorted(fixtures, key=fixture_sort_key))
+        # 1) football-data.co.uk fixtures.csv
+        try:
+            logger.info("LOCAL: получаю fixtures из football-data.co.uk")
+            fixtures = await self._fixtures_from_football_data(target_date)
+            self.last_debug["football_data_fixtures"] = len(fixtures)
+            logger.info("LOCAL: football-data.co.uk вернул матчей: %s", len(fixtures))
+            all_fixtures.extend(fixtures)
+        except Exception as exc:
+            self.last_debug["fallback_errors"].append(f"football-data: {str(exc)[:180]}")
+            logger.warning("LOCAL: football-data fixtures недоступен: %s", exc)
 
+        # 2) TheSportsDB eventsnextleague
         if self.settings.thesportsdb_enabled:
             try:
-                logger.info("LOCAL: football-data пустой, пробую TheSportsDB")
+                logger.info("LOCAL: получаю fixtures из TheSportsDB")
                 fixtures = await self._fixtures_from_thesportsdb(target_date)
                 self.last_debug["thesportsdb_fixtures"] = len(fixtures)
                 logger.info("LOCAL: TheSportsDB вернул матчей: %s", len(fixtures))
+                all_fixtures.extend(fixtures)
             except Exception as exc:
                 self.last_debug["fallback_errors"].append(f"TheSportsDB: {str(exc)[:180]}")
-                fixtures = []
+                logger.warning("LOCAL: TheSportsDB fixtures недоступен: %s", exc)
 
-        if fixtures:
-            self.last_debug["used_source"] = "thesportsdb.com"
-            return deduplicate_fixtures(sorted(fixtures, key=fixture_sort_key))
-
+        # 3) ESPN scoreboard
         if self.settings.espn_enabled:
             try:
-                logger.info("LOCAL: TheSportsDB пустой, пробую ESPN scoreboard")
+                logger.info("LOCAL: получаю fixtures из ESPN scoreboard")
                 fixtures = await self._fixtures_from_espn(target_date)
                 self.last_debug["espn_fixtures"] = len(fixtures)
                 logger.info("LOCAL: ESPN вернул матчей: %s", len(fixtures))
+                all_fixtures.extend(fixtures)
             except Exception as exc:
                 self.last_debug["fallback_errors"].append(f"ESPN: {str(exc)[:180]}")
-                fixtures = []
+                logger.warning("LOCAL: ESPN fixtures недоступен: %s", exc)
 
-        if fixtures:
-            self.last_debug["used_source"] = "ESPN scoreboard"
-            return deduplicate_fixtures(sorted(fixtures, key=fixture_sort_key))
+        merged = deduplicate_fixtures(sorted(all_fixtures, key=fixture_sort_key))
+        self.last_debug["used_source"] = "football-data + TheSportsDB + ESPN"
 
-        self.last_debug["used_source"] = "none"
-        return []
+        logger.info(
+            "LOCAL: всего после объединения источников: %s "
+            "(football-data=%s, thesportsdb=%s, espn=%s)",
+            len(merged),
+            self.last_debug["football_data_fixtures"],
+            self.last_debug["thesportsdb_fixtures"],
+            self.last_debug["espn_fixtures"],
+        )
+
+        return merged
+
 
     async def _fixtures_from_football_data(self, target_date: date) -> list[LocalFixture]:
         """Матчи из football-data.co.uk fixtures.csv."""
@@ -280,55 +311,69 @@ class FreeDataProvider:
         return result
 
     async def _fixtures_from_espn(self, target_date: date) -> list[LocalFixture]:
-        """Fallback-матчи из ESPN scoreboard.
+        """Матчи из ESPN scoreboard.
 
-        ESPN не требует ключа для site scoreboard.
+        ESPN не требует ключа и часто лучше покрывает вечерние/ночные лиги:
+        MLS, Brazil, Argentina, Mexico и т.д.
         """
         league_codes = set(self.settings.local_league_codes)
         allowed_countries = self.settings.allowed_countries
-        end_date = target_date + timedelta(days=max(0, self.settings.local_lookahead_days - 1))
-
         result: list[LocalFixture] = []
         dates_param = target_date.strftime("%Y%m%d")
 
         for espn_league in self.settings.espn_leagues:
             league_code = ESPN_TO_LOCAL.get(espn_league)
             if not league_code:
+                logger.info("LOCAL ESPN: лига %s пропущена, нет mapping в ESPN_TO_LOCAL", espn_league)
                 continue
 
             if league_codes and league_code not in league_codes:
                 continue
 
-            meta = LEAGUE_META.get(league_code, {"name": league_code, "country": ""})
-            if allowed_countries and meta["country"].lower() not in allowed_countries:
+            meta = LEAGUE_META.get(league_code, {})
+            if allowed_countries and meta.get("country", "").lower() not in allowed_countries:
                 continue
 
             url = f"https://site.api.espn.com/apis/site/v2/sports/soccer/{espn_league}/scoreboard?dates={dates_param}"
-            data = await self.fetch_json(url)
+
+            try:
+                data = await self.fetch_json(url)
+            except Exception as exc:
+                logger.warning("LOCAL ESPN: не удалось получить league=%s: %s", espn_league, exc)
+                self.last_debug["fallback_errors"].append(f"ESPN {espn_league}: {str(exc)[:120]}")
+                continue
 
             for event in data.get("events", []) or []:
-                parsed_date, parsed_time = parse_espn_event_datetime(event.get("date") or "")
-                if not parsed_date:
+                parsed_date, parsed_time = parse_espn_event_time(event)
+                if parsed_date != target_date:
                     continue
 
-                if not (target_date <= parsed_date <= end_date):
-                    continue
+                status = (event.get("status") or {}).get("type") or {}
+                status_name = str(status.get("name", "") or "").upper()
+                completed = bool(status.get("completed"))
 
-                home = ""
-                away = ""
+                # Для прогнозов берём только ещё не завершённые события.
+                # Started/past отсеет pipeline по времени, но completed можно убрать сразу.
+                if completed or status_name in {"STATUS_FINAL", "STATUS_FULL_TIME"}:
+                    continue
 
                 competitions = event.get("competitions") or []
-                if competitions:
-                    competitors = competitions[0].get("competitors") or []
-                    for comp in competitors:
-                        team_name = (comp.get("team") or {}).get("displayName") or (comp.get("team") or {}).get("shortDisplayName") or ""
-                        if comp.get("homeAway") == "home":
-                            home = clean_team_name(team_name)
-                        elif comp.get("homeAway") == "away":
-                            away = clean_team_name(team_name)
+                competitors = competitions[0].get("competitors", []) if competitions else []
+
+                home = away = ""
+                for comp in competitors:
+                    team_name = (
+                        (comp.get("team") or {}).get("displayName")
+                        or (comp.get("team") or {}).get("shortDisplayName")
+                        or ""
+                    )
+                    if comp.get("homeAway") == "home":
+                        home = clean_team_name(team_name)
+                    elif comp.get("homeAway") == "away":
+                        away = clean_team_name(team_name)
 
                 if not home or not away:
-                    name = event.get("name") or ""
+                    name = event.get("name") or event.get("shortName") or ""
                     if " at " in name:
                         away, home = [clean_team_name(x) for x in name.split(" at ", 1)]
                     elif " vs " in name:
@@ -337,9 +382,11 @@ class FreeDataProvider:
                 if not home or not away:
                     continue
 
+                event_id = str(event.get("id") or f"{espn_league}:{parsed_date.isoformat()}:{slugify(home)}:{slugify(away)}")
+
                 result.append(
                     LocalFixture(
-                        fixture_id=f"LOCAL:ESPN:{event.get('id') or ''}:{league_code}:{parsed_date.isoformat()}:{slugify(home)}:{slugify(away)}",
+                        fixture_id=f"LOCAL:ESPN:{event_id}:{league_code}",
                         league_code=league_code,
                         date=parsed_date,
                         time=parsed_time,
@@ -351,6 +398,7 @@ class FreeDataProvider:
                 )
 
         return result
+
 
     async def build_context(self, fixture: LocalFixture) -> CandidateContext:
         """Собрать контекст матча из бесплатных данных."""
@@ -401,7 +449,11 @@ class FreeDataProvider:
         return ctx
 
     async def history_for_league(self, league_code: str, target_date: date) -> list[dict[str, str]]:
-        """История текущего сезона по лиге."""
+        """История текущего сезона по лиге.
+
+        Для football-data.co.uk доступны не все коды.
+        Для ESPN-only лиг возвращаем пустую историю, чтобы не ломать весь pipeline.
+        """
         season = football_data_season_code(target_date)
         cache_key = f"{season}:{league_code}"
 
@@ -409,8 +461,14 @@ class FreeDataProvider:
             return self._history_cache[cache_key]
 
         url = f"{self.HISTORICAL_BASE}/{season}/{league_code}.csv"
-        text = await self.fetch_text(url)
-        rows = list(csv.DictReader(io.StringIO(text)))
+
+        try:
+            text = await self.fetch_text(url)
+            rows = list(csv.DictReader(io.StringIO(text)))
+        except Exception as exc:
+            logger.info("LOCAL: history unavailable for league_code=%s url=%s: %s", league_code, url, exc)
+            self._history_cache[cache_key] = []
+            return []
 
         played: list[dict[str, str]] = []
         for row in rows:
@@ -420,6 +478,7 @@ class FreeDataProvider:
 
         self._history_cache[cache_key] = played
         return played
+
 
     async def clubelo_for_date(self, target_date: date) -> dict[str, int]:
         """Рейтинги ClubElo на дату."""
