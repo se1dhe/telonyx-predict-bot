@@ -990,6 +990,53 @@ def clean_team_name(value: str) -> str:
     return value.strip()
 
 
+
+def parse_espn_event_time(event: dict) -> tuple[date | None, str]:
+    """Разобрать время ESPN event.
+
+    ESPN обычно отдаёт ISO UTC в поле `date`, например:
+    2026-05-04T23:30Z
+
+    Возвращаем:
+    - date в UTC-дате источника;
+    - HH:MM, который дальше рендер переводит в Киев через общий механизм.
+    """
+    raw = str(event.get("date") or "").strip()
+    if not raw:
+        return None, ""
+
+    try:
+        from datetime import datetime, timezone
+
+        dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+
+        dt_utc = dt.astimezone(timezone.utc)
+        return dt_utc.date(), dt_utc.strftime("%H:%M")
+    except Exception:
+        # Fallback: если ESPN поменяет формат, хотя бы не ломаем весь provider.
+        try:
+            return date.fromisoformat(raw[:10]), raw[11:16] if len(raw) >= 16 else ""
+        except Exception:
+            return None, ""
+
+
+def espn_event_url(event: dict) -> str:
+    """Вернуть ссылку на ESPN match summary, если доступна."""
+    links = event.get("links") or []
+    for link in links:
+        href = link.get("href")
+        if href:
+            return str(href)
+
+    event_id = event.get("id")
+    if event_id:
+        return f"https://www.espn.com/soccer/match/_/gameId/{event_id}"
+
+    return ""
+
+
 def normalize_team_key(value: str) -> str:
     value = value.lower().strip()
     value = value.replace("&", "and")

@@ -841,3 +841,36 @@ AI_FALLBACK_ON_ERROR="true"
   - `MIN_CONTEXT_PRE_AI_SCORE`
 - Рекомендуется увеличить `MAX_RAW_EVENTS` и `MAX_CANDIDATES_FOR_AI`, чтобы AI/локальный селектор видел больше матчей сегодняшнего дня.
 
+
+
+## v41: PostgreSQL on Railway
+
+Изменено:
+
+- Добавлена зависимость `asyncpg`.
+- `DATABASE_URL` теперь автоматически нормализуется:
+  - `postgres://...` -> `postgresql+asyncpg://...`
+  - `postgresql://...` -> `postgresql+asyncpg://...`
+  - `postgresql+asyncpg://...` остаётся как есть.
+- SQLite локально всё ещё поддерживается.
+- Для PostgreSQL включён `pool_pre_ping`, небольшой pool и `pool_recycle`.
+- `.env` и `.env.example` переведены на Railway reference variable:
+
+```env
+DATABASE_URL="${{Postgres.DATABASE_URL}}"
+```
+
+Важно: в Railway нужно добавить PostgreSQL service и поставить эту reference variable в сервис бота.
+
+
+
+## v42: ESPN helper fix + PostgreSQL init diagnostics
+
+Исправлено:
+
+- Добавлены отсутствующие функции `parse_espn_event_time()` и `espn_event_url()`.
+- ESPN provider больше не должен падать с ошибкой `name 'parse_espn_event_time' is not defined`.
+- В `init_db()` добавлено логирование драйвера БД и списка созданных PostgreSQL таблиц.
+- После старта в Railway Logs должна появиться строка вида:
+  `DB init complete. PostgreSQL public tables: [...]`.
+
