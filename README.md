@@ -707,3 +707,29 @@ TELEGRAM_PUBLIC_CHANNEL_RU=""
 - после окончания подписки пользователь удаляется из приватного канала своего языка;
 - уведомления об окончании подписки приходят с кнопками продления через Stars и PayKassa;
 - статистика winrate после завершения матчей и в конце дня отправляется во все заполненные приватные языковые каналы.
+
+
+## v32: PayKassa SCI fix + безопасная отправка в Telegram
+
+Что изменено:
+
+- PayKassa SCI endpoint обновлён до `https://paykassa.pro/sci/0.4/index.php`.
+- Добавлен fallback endpoint `https://paykassa.app/sci/0.4/index.php`.
+- `PAYKASSA_SYSTEM` теперь может быть числом. Для USDT TRC20 используется `30`.
+- `PAYKASSA_SYSTEM_NAME="TRON_TRC20"` оставлен как человекочитаемое название.
+- `sci_confirm_order` используется для подтверждения IPN по `private_hash`.
+- Если Telegram канал указан неверно или бот не админ, daily job больше не падает из-за повторной отправки fallback-сообщения в тот же недоступный chat_id. Ошибка пишется в Railway Logs.
+
+Рекомендуемые PayKassa переменные:
+
+```env
+PAYKASSA_ENABLED="true"
+PAYKASSA_SCI_ID="29914"
+PAYKASSA_SCI_KEY="..."
+PAYKASSA_SYSTEM="30"
+PAYKASSA_SYSTEM_NAME="TRON_TRC20"
+PAYKASSA_CURRENCY="USDT"
+PAYKASSA_TEST_MODE="true"
+PAYKASSA_ENDPOINT="https://paykassa.pro/sci/0.4/index.php"
+PAYKASSA_FALLBACK_ENDPOINTS="https://paykassa.app/sci/0.4/index.php"
+```

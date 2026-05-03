@@ -28,10 +28,16 @@ async def safe_send_html(
     text: str,
     disable_web_page_preview: bool = True,
     reply_markup: dict | None = None,
-) -> None:
-    """Безопасно отправить HTML в Telegram."""
+) -> bool:
+    """Безопасно отправить HTML в Telegram.
+
+    Важно: если Telegram вернул chat not found / bot is not admin,
+    не отправляем fallback в тот же chat_id, иначе весь daily job падает.
+    Возвращаем True/False и пишем точную ошибку в Railway Logs.
+    """
     if not str(chat_id or "").strip():
-        return
+        logger.info("Telegram send skipped: empty chat_id")
+        return False
 
     try:
         await bot.send_message(
@@ -41,18 +47,13 @@ async def safe_send_html(
             disable_web_page_preview=disable_web_page_preview,
             reply_markup=reply_markup,
         )
-    except Exception:
-        logger.exception("Не удалось отправить HTML-сообщение в Telegram")
+        return True
+
+    except Exception as exc:
+        logger.exception("Не удалось отправить HTML-сообщение в Telegram chat_id=%s", chat_id)
+        logger.error("Telegram send error: %s", exc)
         logger.error("Проблемный текст сообщения:\n%s", text)
-        await bot.send_message(
-            chat_id=chat_id,
-            text=(
-                "⚠️ Bot collected data, but could not send a Telegram message.\n"
-                "Details are written to Railway Logs."
-            ),
-            parse_mode=None,
-            disable_web_page_preview=True,
-        )
+        return False
 
 
 def _get_lang_text(data: dict[str, str], lang: str) -> str:
@@ -73,7 +74,10 @@ async def _notify_admin_channels(bot: Bot, text: str) -> None:
         chat_id = settings.private_channel_for(lang)
         if chat_id and chat_id not in sent:
             sent.add(chat_id)
-            await bot.send_message(chat_id=chat_id, text=text, parse_mode=None, disable_web_page_preview=True)
+            try:
+                await bot.send_message(chat_id=chat_id, text=text, parse_mode=None, disable_web_page_preview=True)
+            except Exception as exc:
+                logger.exception("Не удалось отправить техническое уведомление в chat_id=%s: %s", chat_id, exc)
 
 
 async def send_daily_gold_matches(bot: Bot) -> None:
