@@ -449,7 +449,14 @@ class FreeDataProvider:
         return result
 
     async def result_for_prediction(self, fixture_id: str, league_code: str, home_team: str, away_team: str, target_date: date) -> tuple[int, int] | None:
-        """Найти финальный счёт для LOCAL прогноза."""
+        """Найти финальный счёт для LOCAL прогноза.
+
+        v34:
+        1. football-data historical CSV;
+        2. TheSportsDB eventspastleague;
+        3. ESPN scoreboard по дате.
+        """
+        # 1) football-data.co.uk
         history = await self.history_for_league(league_code, target_date)
         for row in history:
             row_date = parse_football_data_date(row.get("Date") or "")
@@ -462,39 +469,113 @@ class FreeDataProvider:
                 except Exception:
                     return None
 
+        # 2) TheSportsDB finished events
+        tsd_score = await self._result_from_thesportsdb(league_code, home_team, away_team, target_date)
+        if tsd_score is not None:
+            return tsd_score
+
+        # 3) ESPN scoreboard
+        espn_score = await self._result_from_espn(league_code, home_team, away_team, target_date)
+        if espn_score is not None:
+            return espn_score
+
         return None
 
+    async def _result_from_thesportsdb(self, league_code: str, home_team: str, away_team: str, target_date: date) -> tuple[int, int] | None:
+        """Проверить финальный счёт через TheSportsDB past events."""
+        if not self.settings.thesportsdb_enabled:
+            return None
 
-def espn_event_url(event: dict[str, Any]) -> str:
-    """Достать точную ссылку ESPN на матч."""
-    links = event.get("links") or []
-    for link in links:
-        href = link.get("href")
-        if href:
-            return href
+        league_ids = [lid for lid, code in THESPORTSDB_TO_LOCAL.items() if code == league_code]
+        if not league_ids:
+            return None
 
-    event_id = event.get("id")
-    if event_id:
-        return f"https://www.espn.com/soccer/match/_/gameId/{event_id}"
+        for league_id in league_ids:
+            try:
+                url = (
+                    f"https://www.thesportsdb.com/api/v1/json/"
+                    f"{self.settings.thesportsdb_api_key}/eventspastleague.php?id={league_id}"
+                )
+                data = await self.fetch_json(url)
+                for event in data.get("events", []) or []:
+                    parsed_date = parse_thesportsdb_date(event.get("dateEvent") or "")
+                    if parsed_date != target_date:
+                        continue
 
-    return ""
+                    home = clean_team_name(event.get("strHomeTeam") or "")
+                    away = clean_team_name(event.get("strAwayTeam") or "")
 
+                    if not (same_team(home, home_team) and same_team(away, away_team)):
+                        continue
 
-def fixture_sort_key(fixture: LocalFixture) -> tuple[str, str, str, str]:
-    """Ключ сортировки матчей."""
-    return (fixture.date.isoformat(), fixture.time, fixture.league_code, fixture.home_team)
+                    home_score = event.get("intHomeScore")
+                    away_score = event.get("intAwayScore")
 
+                    if home_score in {None, ""} or away_score in {None, ""}:
+                        continue
 
-def football_data_season_code(target_date: date) -> str:
-    """Код сезона football-data.co.uk."""
-    if target_date.month >= 7:
-        start_year = target_date.year
-        end_year = target_date.year + 1
-    else:
-        start_year = target_date.year - 1
-        end_year = target_date.year
+                    return int(home_score), int(away_score)
 
-    return f"{start_year % 100:02d}{end_year % 100:02d}"
+            except Exception:
+                logger.exception("LOCAL: не удалось получить результат из TheSportsDB league_id=%s", league_id)
+
+        return None
+
+    async def _result_from_espn(self, league_code: str, home_team: str, away_team: str, target_date: date) -> tuple[int, int] | None:
+        """Проверить финальный счёт через ESPN scoreboard."""
+        if not self.settings.espn_enabled:
+            return None
+
+        dates_param = target_date.strftime("%Y%m%d")
+        espn_leagues = [name for name, code in ESPN_TO_LOCAL.items() if code == league_code]
+
+        for espn_league in espn_leagues:
+            if self.settings.espn_leagues and espn_league not in self.settings.espn_leagues:
+                continue
+
+            try:
+                url = f"https://site.api.espn.com/apis/site/v2/sports/soccer/{espn_league}/scoreboard?dates={dates_param}"
+                data = await self.fetch_json(url)
+
+                for event in data.get("events", []) or []:
+                    competitions = event.get("competitions") or []
+                    if not competitions:
+                        continue
+
+                    status = (event.get("status") or {}).get("type") or {}
+                    is_completed = bool(status.get("completed")) or str(status.get("name", "")).upper() in {"STATUS_FINAL", "STATUS_FULL_TIME"}
+
+                    if not is_completed:
+                        continue
+
+                    competitors = competitions[0].get("competitors") or []
+                    found_home = found_away = ""
+                    home_score = away_score = None
+
+                    for comp in competitors:
+                        team_name = (comp.get("team") or {}).get("displayName") or (comp.get("team") or {}).get("shortDisplayName") or ""
+                        side = comp.get("homeAway")
+                        score = comp.get("score")
+
+                        if side == "home":
+                            found_home = clean_team_name(team_name)
+                            home_score = score
+                        elif side == "away":
+                            found_away = clean_team_name(team_name)
+                            away_score = score
+
+                    if not (same_team(found_home, home_team) and same_team(found_away, away_team)):
+                        continue
+
+                    if home_score in {None, ""} or away_score in {None, ""}:
+                        continue
+
+                    return int(home_score), int(away_score)
+
+            except Exception:
+                logger.exception("LOCAL: не удалось получить результат из ESPN league=%s", espn_league)
+
+        return None
 
 
 def parse_football_data_date(value: str) -> date | None:

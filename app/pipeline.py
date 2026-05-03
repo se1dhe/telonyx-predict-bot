@@ -1,7 +1,7 @@
 from __future__ import annotations
 import logging
 import re
-from datetime import date, datetime
+from datetime import date, datetime, timezone, timedelta
 from html import escape
 from zoneinfo import ZoneInfo
 from sqlalchemy import select
@@ -220,41 +220,57 @@ class DailyPipeline:
         return picks
 
     def _filter_raw_fixtures(self, fixtures: list) -> list:
-        """Первинний фільтр матчів.
+        """Первичный фильтр матчей.
 
-        Поддерживает оба формата:
-        - LOCAL dataclass / RawFixture-like object;
-        - старый API-FOOTBALL dict.
+        Главная защита v34:
+        - не отдаём в прогнозы уже начавшиеся/прошедшие матчи;
+        - оставляем только матчи, которые стартуют минимум через
+          MIN_MATCH_START_LEAD_MINUTES минут;
+        - LOCAL-источники тоже проходят этот фильтр, а не возвращаются «как есть».
         """
-        if self.settings.provider_normalized == "LOCAL":
-            return fixtures[: self.settings.max_raw_events]
-
         allowed = self.settings.allowed_countries
         preferred = set(str(x) for x in self.settings.preferred_league_ids)
         result = []
 
+        now_utc = datetime.now(timezone.utc)
+        min_start_utc = now_utc + timedelta(minutes=max(0, self.settings.min_match_start_lead_minutes))
+
         for fixture in fixtures:
             if isinstance(fixture, dict):
-                status_short = fixture.get("fixture", {}).get("status", {}).get("short")
-                league = fixture.get("league", {})
+                status_short = fixture.get("fixture", {}).get("status", {}).get("short") or ""
+                league = fixture.get("league", {}) or {}
                 country = str(league.get("country", ""))
                 league_id = str(league.get("id", ""))
                 league_name = str(league.get("name", ""))
-                timestamp = fixture.get("fixture", {}).get("timestamp", 9999999999)
+                timestamp = fixture.get("fixture", {}).get("timestamp")
+                start_utc = fixture_start_utc(fixture)
             else:
-                status_short = getattr(fixture, "status", {}).get("short") if isinstance(getattr(fixture, "status", {}), dict) else ""
+                status_value = getattr(fixture, "status", "")
+                status_short = status_value.get("short") if isinstance(status_value, dict) else (status_value or "NS")
                 country = str(getattr(fixture, "country", ""))
                 league_id = str(getattr(fixture, "league_id", ""))
                 league_name = str(getattr(fixture, "league_name", ""))
-                timestamp = getattr(fixture, "timestamp", 9999999999) or 9999999999
+                timestamp = getattr(fixture, "timestamp", None)
+                start_utc = fixture_start_utc(fixture)
 
-            if status_short not in {"NS", "TBD"}:
+            # Берём только запланированные матчи.
+            if status_short and status_short not in {"NS", "TBD"}:
                 continue
 
-            if allowed and country.lower() not in allowed:
+            # Если удалось определить старт — матч должен быть строго будущим.
+            if start_utc is not None and start_utc < min_start_utc:
+                logger.info(
+                    "Fixture skipped because already started/past: %s start_utc=%s min_start_utc=%s",
+                    safe_fixture_title(fixture),
+                    start_utc.isoformat(),
+                    min_start_utc.isoformat(),
+                )
                 continue
 
-            if preferred and league_id not in preferred:
+            if allowed and country and country.lower() not in allowed:
+                continue
+
+            if preferred and league_id and league_id not in preferred:
                 continue
 
             text = f"{league_name} {country}".lower()
@@ -263,8 +279,9 @@ class DailyPipeline:
 
             result.append(fixture)
 
-        result.sort(key=lambda f: f.get("fixture", {}).get("timestamp", 9999999999) if isinstance(f, dict) else (getattr(f, "timestamp", 9999999999) or 9999999999))
+        result.sort(key=lambda f: fixture_sort_timestamp(f))
         return result[: self.settings.max_raw_events]
+
 
     async def _load_existing_texts(self, date_key: str, provider_name: str) -> tuple[dict[str, str], dict[str, list[str]]] | None:
         async with SessionLocal() as session:
@@ -303,6 +320,66 @@ class DailyPipeline:
                         rendered_text=rendered, main_bet_code=pick.main_bet_code, main_bet_label=pick.main_bet_label,
                         confidence=pick.confidence, ai_rank_score=pick.ai_rank_score))
             await session.commit()
+
+
+def fixture_start_utc(fixture: object) -> datetime | None:
+    """Определить старт матча в UTC.
+
+    Для LOCAL date+time считаем UTC, потому что TheSportsDB/ESPN обычно
+    возвращают UTC-время, а рендер уже переводит его в Киев.
+    """
+    try:
+        if isinstance(fixture, dict):
+            timestamp = fixture.get("fixture", {}).get("timestamp")
+            if timestamp:
+                return datetime.fromtimestamp(int(timestamp), tz=timezone.utc)
+
+            raw_date = fixture.get("fixture", {}).get("date") or ""
+            if raw_date:
+                dt = datetime.fromisoformat(str(raw_date).replace("Z", "+00:00"))
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                return dt.astimezone(timezone.utc)
+
+        fixture_date = getattr(fixture, "date", None)
+        fixture_time = str(getattr(fixture, "time", "") or "").strip()
+
+        if fixture_date:
+            if fixture_time and len(fixture_time) >= 5:
+                hh, mm = fixture_time[:5].split(":", 1)
+                return datetime(
+                    fixture_date.year,
+                    fixture_date.month,
+                    fixture_date.day,
+                    int(hh),
+                    int(mm),
+                    tzinfo=timezone.utc,
+                )
+
+            # Если времени нет, считаем старт концом дня UTC, чтобы матч не отсеять ошибочно утром.
+            return datetime(
+                fixture_date.year,
+                fixture_date.month,
+                fixture_date.day,
+                23,
+                59,
+                tzinfo=timezone.utc,
+            )
+    except Exception:
+        return None
+
+    return None
+
+
+def fixture_sort_timestamp(fixture: object) -> int:
+    start = fixture_start_utc(fixture)
+    if start is not None:
+        return int(start.timestamp())
+
+    if isinstance(fixture, dict):
+        return int(fixture.get("fixture", {}).get("timestamp") or 9999999999)
+
+    return int(getattr(fixture, "timestamp", None) or 9999999999)
 
 def split_match_title(title: str) -> tuple[str, str]:
     if "—" in title:

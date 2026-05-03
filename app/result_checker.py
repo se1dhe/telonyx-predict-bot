@@ -45,12 +45,15 @@ class ResultChecker:
                 continue
             sent.add(chat_id)
             text = texts_by_lang.get(lang) or texts_by_lang.get("uk") or next(iter(texts_by_lang.values()))
-            await self.bot.send_message(
-                chat_id,
-                text,
-                parse_mode=ParseMode.HTML,
-                disable_web_page_preview=True,
-            )
+            try:
+                await self.bot.send_message(
+                    chat_id,
+                    text,
+                    parse_mode=ParseMode.HTML,
+                    disable_web_page_preview=True,
+                )
+            except Exception as exc:
+                logger.exception("Не удалось отправить статистику/результат в канал chat_id=%s: %s", chat_id, exc)
 
     async def check_open_predictions(self) -> int:
         """Проверить все открытые прогнозы.
@@ -77,6 +80,15 @@ class ResultChecker:
             try:
                 score = await self._fetch_score(p)
                 if score is None:
+                    logger.info(
+                        "Результат ещё не найден: prediction_id=%s fixture_id=%s match=%s — %s date=%s provider=%s",
+                        p.id,
+                        p.fixture_id,
+                        p.home_team,
+                        p.away_team,
+                        p.date_key,
+                        p.provider,
+                    )
                     continue
 
                 home_score, away_score = score
@@ -101,6 +113,15 @@ class ResultChecker:
                 )
 
                 closed_count += 1
+                logger.info(
+                    "Прогноз закрыт: prediction_id=%s match=%s — %s score=%s:%s status=%s",
+                    p.id,
+                    p.home_team,
+                    p.away_team,
+                    home_score,
+                    away_score,
+                    status,
+                )
                 await save_stats_snapshot()
 
                 texts: dict[str, str] = {}

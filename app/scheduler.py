@@ -220,7 +220,7 @@ def setup_scheduler(bot: Bot) -> AsyncIOScheduler:
     scheduler.add_job(
         check_results,
         trigger="interval",
-        hours=1,
+        minutes=settings.result_check_interval_minutes,
         args=[bot],
         id="check_results",
         replace_existing=True,
