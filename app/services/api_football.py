@@ -245,7 +245,18 @@ class ApiFootballClient:
 
 def metrics_from_api_fixtures(rows: list[dict[str, Any]], team_id: str) -> TeamMetrics:
     """Метрики команды из API-FOOTBALL fixtures."""
-    metrics = TeamMetrics(matches=len(rows))
+    team_name = ""
+
+    for row in rows:
+        teams = row.get("teams", {})
+        if str(teams.get("home", {}).get("id")) == str(team_id):
+            team_name = teams.get("home", {}).get("name") or ""
+            break
+        if str(teams.get("away", {}).get("id")) == str(team_id):
+            team_name = teams.get("away", {}).get("name") or ""
+            break
+
+    metrics = TeamMetrics(team_id=str(team_id), name=team_name, matches=len(rows))
 
     for row in rows:
         teams = row.get("teams", {})

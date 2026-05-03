@@ -7,8 +7,8 @@ BetCode = Literal["OVER_1_5","OVER_2_5","BTTS_YES","HOME_DOUBLE_CHANCE","AWAY_DO
 
 class TeamMetrics(BaseModel):
     """Метрики формы."""
-    team_id: str
-    name: str
+    team_id: str = ""
+    name: str = ""
     matches: int = 0
     wins: int = 0
     draws: int = 0
@@ -22,6 +22,31 @@ class TeamMetrics(BaseModel):
     failed_to_score: int = 0
     elo: int | None = None
     last_results: list[str] = Field(default_factory=list)
+
+class RawFixture(BaseModel):
+    """Сырой матч из источника данных.
+
+    Используется API_FOOTBALL provider. LOCAL provider может использовать свои dataclass-объекты,
+    но pipeline умеет работать с обоими вариантами.
+    """
+    fixture_id: str
+    date: str = ""
+    timestamp: int | None = None
+    status: dict[str, Any] = Field(default_factory=dict)
+
+    league_id: str = ""
+    league_name: str = ""
+    country: str = ""
+    season: int | None = None
+
+    home_team_id: str = ""
+    away_team_id: str = ""
+    home_team: str = ""
+    away_team: str = ""
+
+    provider: str = "API_FOOTBALL"
+    source_league_code: str = ""
+
 
 class CandidateContext(BaseModel):
     """Контекст матча."""

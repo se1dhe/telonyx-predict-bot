@@ -302,3 +302,19 @@ APIFOOTBALL_FREE_PLAN=true
 APIFOOTBALL_FREE_PLAN=true
 APIFOOTBALL_SEASON=2025
 ```
+
+
+## V15: fix RawFixture import
+
+Исправлена ошибка запуска:
+
+```text
+ImportError: cannot import name 'RawFixture' from 'app.schemas'
+```
+
+Причина:
+в v14 `api_football.py` импортировал `RawFixture`, но модель не была добавлена в `schemas.py`.
+
+Также исправлено:
+- `TeamMetrics` теперь можно создавать из API-FOOTBALL без обязательных `team_id/name`;
+- API_FOOTBALL фильтр теперь работает с `RawFixture` объектами, а не только со старыми dict.

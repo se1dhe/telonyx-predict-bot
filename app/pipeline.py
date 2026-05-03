@@ -160,25 +160,51 @@ class DailyPipeline:
         return picks
 
     def _filter_raw_fixtures(self, fixtures: list) -> list:
+        """Первичный фильтр матчей.
+
+        Поддерживает оба формата:
+        - LOCAL dataclass / RawFixture-like object;
+        - старый API-FOOTBALL dict.
+        """
         if self.settings.provider_normalized == "LOCAL":
-            return fixtures
+            return fixtures[: self.settings.max_raw_events]
+
         allowed = self.settings.allowed_countries
-        preferred = set(self.settings.preferred_league_ids)
+        preferred = set(str(x) for x in self.settings.preferred_league_ids)
         result = []
+
         for fixture in fixtures:
-            if fixture.get("fixture", {}).get("status", {}).get("short") not in {"NS", "TBD"}:
+            if isinstance(fixture, dict):
+                status_short = fixture.get("fixture", {}).get("status", {}).get("short")
+                league = fixture.get("league", {})
+                country = str(league.get("country", ""))
+                league_id = str(league.get("id", ""))
+                league_name = str(league.get("name", ""))
+                timestamp = fixture.get("fixture", {}).get("timestamp", 9999999999)
+            else:
+                status_short = getattr(fixture, "status", {}).get("short") if isinstance(getattr(fixture, "status", {}), dict) else ""
+                country = str(getattr(fixture, "country", ""))
+                league_id = str(getattr(fixture, "league_id", ""))
+                league_name = str(getattr(fixture, "league_name", ""))
+                timestamp = getattr(fixture, "timestamp", 9999999999) or 9999999999
+
+            if status_short not in {"NS", "TBD"}:
                 continue
-            league = fixture.get("league", {})
-            if allowed and str(league.get("country", "")).lower() not in allowed:
+
+            if allowed and country.lower() not in allowed:
                 continue
-            if preferred and league.get("id") not in preferred:
+
+            if preferred and league_id not in preferred:
                 continue
-            text = f"{league.get('name','')} {league.get('country','')}".lower()
-            if any(w in text for w in ["u17","u19","u20","women","amateur","esoccer","virtual","friendly"]):
+
+            text = f"{league_name} {country}".lower()
+            if any(w in text for w in ["u17", "u19", "u20", "u21", "women", "amateur", "esoccer", "virtual", "friendly"]):
                 continue
+
             result.append(fixture)
-        result.sort(key=lambda f: f.get("fixture", {}).get("timestamp", 9999999999))
-        return result
+
+        result.sort(key=lambda f: f.get("fixture", {}).get("timestamp", 9999999999) if isinstance(f, dict) else (getattr(f, "timestamp", 9999999999) or 9999999999))
+        return result[: self.settings.max_raw_events]
 
     async def _load_existing_texts(self, date_key: str, provider_name: str) -> tuple[str, list[str]] | None:
         async with SessionLocal() as session:
