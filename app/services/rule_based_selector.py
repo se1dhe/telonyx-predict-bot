@@ -5,13 +5,13 @@ from app.schemas import AiPick, AiSelectionResponse, CandidateContext
 
 
 class RuleBasedSelector:
-    """Бесплатный fallback-аналитик без OpenAI."""
+    """Безкоштовний fallback-аналітик без OpenAI."""
 
     def __init__(self) -> None:
         self.settings = get_settings()
 
     async def select_gold_matches(self, contexts: list[CandidateContext]) -> AiSelectionResponse:
-        """Выбрать лучшие матчи локальным алгоритмом."""
+        """Вибрати найкращі матчі локальним алгоритмом."""
         scored: list[tuple[int, AiPick]] = []
         rejected: list[str] = []
 
@@ -33,7 +33,7 @@ class RuleBasedSelector:
 
 
 def build_pick(ctx: CandidateContext) -> AiPick:
-    """Собрать прогноз по статистическим правилам."""
+    """Зібрати прогноз за статистичними правилами."""
     h = ctx.home_metrics
     a = ctx.away_metrics
 
@@ -62,53 +62,53 @@ def build_pick(ctx: CandidateContext) -> AiPick:
     safe_label = "ТБ 1.5"
     risky_label = "ТБ 2.5"
     predicted_winner = "Исход лучше не трогать"
-    who_should_score = "Осторожнее через общий тотал"
-    risk = "средний"
+    who_should_score = "Обережніше через загальний тотал"
+    risk = "середній"
 
     if over15_rate >= 0.68 and (h_goal_avg + a_goal_avg) >= 2.1:
         bet_code = "OVER_1_5"
         bet_label = "ТБ 1.5"
-        risk = "низкий"
+        risk = "низький"
 
     if over25_rate >= 0.58 and (h_goal_avg + a_goal_avg) >= 2.5 and (h_concede_avg + a_concede_avg) >= 1.6:
         bet_code = "OVER_2_5"
         bet_label = "ТБ 2.5"
         safe_label = "ТБ 1.5"
         risky_label = "ОЗ Да"
-        risk = "средний"
+        risk = "середній"
 
     if btts_rate >= 0.60 and h_goal_avg >= 1.0 and a_goal_avg >= 1.0:
         bet_code = "BTTS_YES"
-        bet_label = "Обе забьют — Да"
+        bet_label = "Обе заб’ють — Да"
         safe_label = "ТБ 1.5"
         risky_label = "ОЗ Да + ТБ 2.5"
-        risk = "средний"
+        risk = "середній"
 
     if strength_diff >= 0.75:
         bet_code = "HOME_DOUBLE_CHANCE"
-        bet_label = f"{ctx.home_team} не проиграет"
-        safe_label = f"{ctx.home_team} не проиграет"
+        bet_label = f"{ctx.home_team} не програє"
+        safe_label = f"{ctx.home_team} не програє"
         risky_label = f"{ctx.home_team} DNB"
         predicted_winner = f"{ctx.home_team} ближе к победе, но безопаснее через 1X"
         who_should_score = f"{ctx.home_team} должен забить минимум один"
-        risk = "низкий"
+        risk = "низький"
     elif strength_diff <= -0.75:
         bet_code = "AWAY_DOUBLE_CHANCE"
-        bet_label = f"{ctx.away_team} не проиграет"
-        safe_label = f"{ctx.away_team} не проиграет"
+        bet_label = f"{ctx.away_team} не програє"
+        safe_label = f"{ctx.away_team} не програє"
         risky_label = f"{ctx.away_team} DNB"
         predicted_winner = f"{ctx.away_team} ближе к победе, но безопаснее через X2"
         who_should_score = f"{ctx.away_team} должен забить минимум один"
-        risk = "низкий"
+        risk = "низький"
 
     if bet_code == "HOME_DOUBLE_CHANCE" and over15_rate >= 0.62:
         bet_code = "HOME_OR_DRAW_OVER_1_5"
-        bet_label = f"{ctx.home_team} не проиграет + ТБ 1.5"
+        bet_label = f"{ctx.home_team} не програє + ТБ 1.5"
         risky_label = f"{ctx.home_team} победа + ТБ 1.5"
 
     if bet_code == "AWAY_DOUBLE_CHANCE" and over15_rate >= 0.62:
         bet_code = "AWAY_OR_DRAW_OVER_1_5"
-        bet_label = f"{ctx.away_team} не проиграет + ТБ 1.5"
+        bet_label = f"{ctx.away_team} не програє + ТБ 1.5"
         risky_label = f"{ctx.away_team} победа + ТБ 1.5"
 
     confidence = calculate_confidence(ctx, over15_rate, over25_rate, btts_rate, abs(strength_diff))
@@ -130,7 +130,7 @@ def build_pick(ctx: CandidateContext) -> AiPick:
         else:
             predicted_winner = "Матч выглядит равным, безопаснее рынок голов"
 
-    if who_should_score == "Осторожнее через общий тотал":
+    if who_should_score == "Обережніше через загальний тотал":
         if h_goal_avg >= a_goal_avg:
             who_should_score = f"{ctx.home_team} выглядит вероятнее по голу, но ставка лучше через общий рынок"
         else:

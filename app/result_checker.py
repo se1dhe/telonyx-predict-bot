@@ -19,7 +19,7 @@ from app.services.render import render_result_line
 from app.services.statistics import (
     evaluate_bet_status,
     render_after_match_daily_stats_report,
-    render_daily_end_stats_report,
+    render_full_stats_report as render_daily_end_stats_report,
     save_stats_snapshot,
 )
 
@@ -35,6 +35,22 @@ class ResultChecker:
         self.settings = get_settings()
         self.api_provider = ApiFootballClient()
         self.local_provider = FreeDataProvider()
+
+    async def _send_to_private_channels(self, texts_by_lang: dict[str, str]) -> None:
+        """Отправить сообщение во все заполненные приватные языковые каналы."""
+        sent = set()
+        for lang in self.settings.active_private_languages:
+            chat_id = self.settings.private_channel_for(lang)
+            if not chat_id or chat_id in sent:
+                continue
+            sent.add(chat_id)
+            text = texts_by_lang.get(lang) or texts_by_lang.get("uk") or next(iter(texts_by_lang.values()))
+            await self.bot.send_message(
+                chat_id,
+                text,
+                parse_mode=ParseMode.HTML,
+                disable_web_page_preview=True,
+            )
 
     async def check_open_predictions(self) -> int:
         """Проверить все открытые прогнозы.
@@ -65,13 +81,15 @@ class ResultChecker:
 
                 home_score, away_score = score
                 status = evaluate_bet_status(p.main_bet_code, home_score, away_score)
-
                 pick = AiPick.model_validate_json(p.prediction_json)
-                line = render_result_line(
+
+                # В БД сохраняем украинский результат, а в каналы отправляем языковые версии.
+                stored_line = render_result_line(
                     pick.match_title,
                     f"{home_score}:{away_score}",
                     pick.main_bet_label,
                     status,
+                    lang="uk",
                 )
 
                 await self._mark_prediction(
@@ -79,24 +97,36 @@ class ResultChecker:
                     home_score=home_score,
                     away_score=away_score,
                     status=status,
-                    result_text=line,
+                    result_text=stored_line,
                 )
 
                 closed_count += 1
                 await save_stats_snapshot()
 
-                text = f"📌 <b>Матч завершён</b>\n\n{line}"
+                texts: dict[str, str] = {}
+                for lang in self.settings.render_languages:
+                    title = {
+                        "uk": "📌 <b>Матч завершено</b>",
+                        "en": "📌 <b>Match finished</b>",
+                        "ru": "📌 <b>Матч завершён</b>",
+                    }.get(lang, "📌 <b>Match finished</b>")
 
-                if self.settings.stats_after_each_finished_match_enabled:
-                    daily_stats = await render_after_match_daily_stats_report(p.date_key)
-                    text += f"\n\n{daily_stats}"
+                    line = render_result_line(
+                        pick.match_title,
+                        f"{home_score}:{away_score}",
+                        pick.main_bet_label,
+                        status,
+                        lang=lang,
+                    )
+                    text = f"{title}\n\n{line}"
 
-                await self.bot.send_message(
-                    self.settings.telegram_private_channel_id,
-                    text,
-                    parse_mode=ParseMode.HTML,
-                    disable_web_page_preview=True,
-                )
+                    if self.settings.stats_after_each_finished_match_enabled:
+                        daily_stats = await render_after_match_daily_stats_report(p.date_key, lang=lang)
+                        text += f"\n\n{daily_stats}"
+
+                    texts[lang] = text
+
+                await self._send_to_private_channels(texts)
 
             except Exception:
                 logger.exception("Не удалось проверить прогноз id=%s", p.id)
@@ -117,14 +147,13 @@ class ResultChecker:
             logger.info("Статистика за %s уже отправлялась", date_key)
             return False
 
-        text = await render_daily_end_stats_report(date_key)
-        await self.bot.send_message(
-            self.settings.telegram_private_channel_id,
-            text,
-            parse_mode=ParseMode.HTML,
-            disable_web_page_preview=True,
-        )
-        await self._save_report(date_key, text)
+        texts = {
+            lang: await render_daily_end_stats_report(date_key, lang=lang)
+            for lang in self.settings.render_languages
+        }
+        await self._send_to_private_channels(texts)
+
+        await self._save_report(date_key, texts.get("uk") or next(iter(texts.values())))
         return True
 
     async def _fetch_score(self, prediction: Prediction) -> tuple[int, int] | None:

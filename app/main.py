@@ -39,10 +39,10 @@ async def main() -> None:
         asyncio.create_task(send_daily_gold_matches(bot))
 
     logging.info(
-        "TelOnyx Predict Bot запущен. DATA_PROVIDER=%s, public=%s, private=%s",
+        "TelOnyx Predict Bot запущен. DATA_PROVIDER=%s, public_languages=%s, private_languages=%s",
         settings.provider_normalized,
-        settings.telegram_public_channel,
-        settings.telegram_private_channel_id,
+        settings.active_public_languages,
+        settings.active_private_languages,
     )
 
     await dp.start_polling(bot)

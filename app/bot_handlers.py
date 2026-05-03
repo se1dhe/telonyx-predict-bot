@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-import json
 import uuid
 from datetime import datetime
 
@@ -10,7 +9,7 @@ from aiogram.filters import CommandStart
 from aiogram.types import CallbackQuery, LabeledPrice, Message, PreCheckoutQuery
 
 from app.config import get_settings
-from app.i18n import t
+from app.i18n import t, normalize_lang
 from app.keyboards import back_keyboard, lang_keyboard, main_menu, pay_url_keyboard, payment_keyboard, plans_keyboard
 from app.services.access import create_private_invite
 from app.services.paykassa import PayKassaClient
@@ -31,36 +30,68 @@ router = Router()
 logger = logging.getLogger(__name__)
 
 
+def _start_lang_from_text(text: str | None) -> str | None:
+    """Достать язык из /start vip_uk / vip_en / vip_ru."""
+    value = (text or "").strip()
+    parts = value.split(maxsplit=1)
+    if len(parts) < 2:
+        return None
+    payload = parts[1].strip().lower()
+    if payload in {"vip_uk", "uk"}:
+        return "uk"
+    if payload in {"vip_en", "en"}:
+        return "en"
+    if payload in {"vip_ru", "ru"}:
+        return "ru"
+    return None
+
+
 @router.message(CommandStart())
 async def start(message: Message) -> None:
+    """Первый экран бота: выбор языка или меню пользователя."""
+    settings = get_settings()
     user = await get_or_create_user(message.from_user)
-    if not user.language_code:
-        await message.answer(t("ru", "choose_lang"), reply_markup=lang_keyboard())
+
+    start_lang = _start_lang_from_text(message.text)
+    if start_lang:
+        lang = settings.normalize_language(start_lang)
+        await set_language(message.from_user.id, lang)
+        await message.answer(
+            t(lang, "start") + "\n\n" + t(lang, "menu"),
+            reply_markup=main_menu(lang),
+            disable_web_page_preview=True,
+        )
         return
 
-    await message.answer(
-        t(user.language_code, "start") + "\n\n" + t(user.language_code, "menu"),
-        reply_markup=main_menu(user.language_code),
-        disable_web_page_preview=True,
-    )
+    if user.language_code in settings.supported_languages:
+        lang = settings.normalize_language(user.language_code)
+        await message.answer(
+            t(lang, "start") + "\n\n" + t(lang, "menu"),
+            reply_markup=main_menu(lang),
+            disable_web_page_preview=True,
+        )
+        return
 
-
-@router.callback_query(F.data.startswith("lang:"))
-async def choose_language(callback: CallbackQuery) -> None:
-    lang = callback.data.split(":", 1)[1]
-    await get_or_create_user(callback.from_user)
-    await set_language(callback.from_user.id, lang)
-    await callback.message.edit_text(
-        t(lang, "lang_saved") + "\n\n" + t(lang, "start") + "\n\n" + t(lang, "menu"),
-        reply_markup=main_menu(lang),
-        disable_web_page_preview=True,
-    )
-    await callback.answer()
+    await message.answer(t(settings.default_language, "choose_language"), reply_markup=lang_keyboard())
 
 
 @router.callback_query(F.data == "menu:language")
 async def menu_language(callback: CallbackQuery) -> None:
-    await callback.message.edit_text(t("ru", "choose_lang"), reply_markup=lang_keyboard())
+    lang = await get_user_lang(callback.from_user.id)
+    await callback.message.edit_text(t(lang, "choose_language"), reply_markup=lang_keyboard())
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("lang:"))
+async def choose_language(callback: CallbackQuery) -> None:
+    settings = get_settings()
+    lang = settings.normalize_language(callback.data.split(":", 1)[1])
+    await set_language(callback.from_user.id, lang)
+    await callback.message.edit_text(
+        t(lang, "language_saved") + "\n\n" + t(lang, "start") + "\n\n" + t(lang, "menu"),
+        reply_markup=main_menu(lang),
+        disable_web_page_preview=True,
+    )
     await callback.answer()
 
 
@@ -77,7 +108,14 @@ async def menu_main(callback: CallbackQuery) -> None:
 
 @router.callback_query(F.data == "menu:plans")
 async def menu_plans(callback: CallbackQuery) -> None:
+    settings = get_settings()
     lang = await get_user_lang(callback.from_user.id)
+
+    if not settings.private_channel_for(lang):
+        await callback.message.edit_text(t(lang, "channel_unavailable"), reply_markup=main_menu(lang))
+        await callback.answer()
+        return
+
     await callback.message.edit_text(t(lang, "plans"), reply_markup=plans_keyboard(lang))
     await callback.answer()
 
@@ -94,6 +132,12 @@ async def select_plan(callback: CallbackQuery) -> None:
 async def pay_stars(callback: CallbackQuery, bot: Bot) -> None:
     settings = get_settings()
     lang = await get_user_lang(callback.from_user.id)
+
+    if not settings.private_channel_for(lang):
+        await callback.message.edit_text(t(lang, "channel_unavailable"), reply_markup=main_menu(lang))
+        await callback.answer()
+        return
+
     plan_code = callback.data.split(":")[-1]
     days = plan_days(plan_code)
     amount_stars = get_price_stars(settings, plan_code)
@@ -136,7 +180,7 @@ async def successful_stars_payment(message: Message, bot: Bot) -> None:
         return
 
     await grant_access(message.from_user.id, tx.plan_code)
-    invite_url = await create_private_invite(bot, name=f"Stars {message.from_user.id}")
+    invite_url = await create_private_invite(bot, lang=lang, name=f"Stars {message.from_user.id}")
 
     await message.answer(
         t(lang, "paid") + "\n\n" + t(lang, "invite", url=invite_url),
@@ -149,6 +193,12 @@ async def successful_stars_payment(message: Message, bot: Bot) -> None:
 async def pay_paykassa(callback: CallbackQuery) -> None:
     settings = get_settings()
     lang = await get_user_lang(callback.from_user.id)
+
+    if not settings.private_channel_for(lang):
+        await callback.message.edit_text(t(lang, "channel_unavailable"), reply_markup=main_menu(lang))
+        await callback.answer()
+        return
+
     plan_code = callback.data.split(":")[-1]
 
     if not settings.paykassa_enabled:

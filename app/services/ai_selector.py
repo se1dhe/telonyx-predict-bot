@@ -20,52 +20,52 @@ class AiSelector:
             item["tracking_url"] = ctx.tracking_url
             payload.append(item)
         prompt = f"""
-Ты футбольный аналитик для Telegram-бота.
+Ти футбольний аналітик для Telegram-бота. Усі текстові поля в JSON відповіді пиши українською мовою.
 
-Методология:
-1. Форма команд за последние игры.
-2. BTTS, Over 1.5, Over 2.5, забивают/пропускают.
+Методологія:
+1. Форма команд за останні матчі.
+2. BTTS, Over 1.5, Over 2.5, забивають/пропускають.
 3. H2H.
-4. Таблица, рейтинг Elo, контекст турнира.
-5. Новости/травмы/составы из SerpAPI. Не выдумывать.
-6. В LOCAL режиме учитывать, что injuries/current odds могут быть неполными.
-7. Отсеять сомнительные матчи.
-8. Оставить максимум {self.settings.matches_per_day} лучших матчей.
-9. Выбрать самый логичный рынок:
+4. Таблиця, рейтинг Elo, турнірний контекст.
+5. Новини/травми/склади із SerpAPI. Не вигадуй факти.
+6. У LOCAL режимі враховуй, що injuries/current odds можуть бути неповними.
+7. Відсій сумнівні матчі.
+8. Залиши максимум {self.settings.matches_per_day} найкращих матчів.
+9. Обери найлогічніший ринок:
 OVER_1_5, OVER_2_5, BTTS_YES, HOME_DOUBLE_CHANCE, AWAY_DOUBLE_CHANCE,
 HOME_OR_DRAW_OVER_1_5, AWAY_OR_DRAW_OVER_1_5, HOME_DNB, AWAY_DNB, NO_BET.
 
-Правила:
-- Не выбирать ниже confidence {self.settings.min_ai_confidence}.
-- Не писать гарантий.
-- fixture_id брать строго из кандидата.
-- tracking_url брать строго из кандидата.
-- Вернуть только JSON без markdown.
+Вимоги:
+- Не обирай нижче confidence {self.settings.min_ai_confidence}.
+- Не давай агресивні ставки без сильних даних.
+- Якщо матч сумнівний — відхиляй.
+- Не вигадуй травми, коефіцієнти або новини, яких немає в даних.
+- Відповідай тільки валідним JSON без markdown.
 
 Формат:
 {{
  "selected": [{{
-  "fixture_id": "id",
   "match_title": "Team A — Team B",
-  "ai_rank_score": 80,
-  "predicted_winner": "Team A не проиграет / исход опасный",
-  "who_should_score": "Обе / Team A / осторожнее через тотал",
-  "main_bet_code": "OVER_2_5",
-  "main_bet_label": "ТБ 2.5",
-  "safe_bet_label": "ТБ 1.5",
-  "risky_bet_label": "ОЗ Да",
-  "risk_level": "низкий / средний / высокий",
+  "event_id": "id",
+  "main_bet_code": "OVER_1_5",
+  "main_bet_label": "Тотал більше 1.5",
+  "predicted_winner": "господарі ближче до перемоги / результат ризиковий",
+  "who_should_score": "обидві можуть забити / краще через тотал",
+  "safe_bet_label": "Тотал більше 1.5",
+  "risky_bet_label": "Обидві заб’ють — так",
+  "risk_level": "низький / середній / високий",
   "confidence": 70,
   "expected_score": "2:1",
-  "why_this_match_is_gold": "Почему матч прошёл фильтр",
-  "reasoning": "Короткий, но вдумчивый разбор",
-  "data_warnings": ["нет подтверждённых травм"],
-  "tracking_url": "https://www.sofascore.com/search?q=..."
+  "why_this_match_is_gold": "Чому матч пройшов фільтр",
+  "reasoning": "Короткий, але вдумливий розбір",
+  "data_warnings": ["немає підтверджених травм"],
+  "tracking_url": "https://www.sofascore.com/search?q=...",
+  "bookmaker_url": ""
  }}],
- "rejected_summary": ["Team C — Team D: мало данных"]
+ "rejected_summary": ["Team C — Team D: мало даних"]
 }}
 
-Кандидаты:
+Кандидати:
 {json.dumps(payload, ensure_ascii=False)}
 """
         # Важно:

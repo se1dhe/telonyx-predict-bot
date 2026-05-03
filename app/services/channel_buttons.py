@@ -1,16 +1,24 @@
 from __future__ import annotations
 
 from app.config import get_settings
+from app.i18n import normalize_lang
 from app.styled_buttons import inline_keyboard, styled_button
 
 
-def public_channel_cta_keyboard() -> dict | None:
+CTA_TEXT = {
+    "uk": "🔒 Отримати VIP-доступ",
+    "en": "🔒 Get VIP access",
+    "ru": "🔒 Получить VIP-доступ",
+}
+
+
+def public_channel_cta_keyboard(lang: str = "uk") -> dict | None:
     """Зелёная CTA-кнопка под постами в открытом канале.
 
-    Кнопка ведёт в бота, где пользователь может выбрать тариф и оплатить доступ
-    в приватный канал через Stars или PayKassa.
+    Кнопка ведёт в бота с языковым start-параметром.
     """
     settings = get_settings()
+    lang = normalize_lang(lang)
 
     if not settings.public_channel_cta_enabled:
         return None
@@ -22,8 +30,8 @@ def public_channel_cta_keyboard() -> dict | None:
     return inline_keyboard([
         [
             styled_button(
-                "🔒 Получить VIP доступ / Get VIP access",
-                url=f"https://t.me/{username}?start=vip",
+                CTA_TEXT.get(lang, CTA_TEXT["uk"]),
+                url=f"https://t.me/{username}?start=vip_{lang}",
                 style="success",
             )
         ]

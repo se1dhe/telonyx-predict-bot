@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 def telonyx_page(title: str, subtitle: str, status: str, accent: str) -> str:
     """Мини-страница в стиле TelOnyx для redirect-страниц PayKassa."""
     return f"""<!doctype html>
-<html lang="ru">
+<html lang="uk">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -195,12 +195,12 @@ def telonyx_page(title: str, subtitle: str, status: str, accent: str) -> str:
       </div>
 
       <div class="actions">
-        <a class="btn primary" href="https://t.me/telonyx_predict">Открыть канал</a>
-        <a class="btn" href="https://t.me/telonyx_predict_bot">Открыть бота</a>
+        <a class="btn primary" href="https://t.me/telonyx_predict">Відкрити канал</a>
+        <a class="btn" href="https://t.me/telonyx_predict_bot">Відкрити бота</a>
       </div>
 
       <div class="hint">
-        Если доступ не появился сразу — вернитесь в Telegram-бота. Обычно подтверждение приходит автоматически после callback от PayKassa.
+        Якщо доступ не з’явився одразу — поверніться в Telegram-бота. Зазвичай підтвердження приходить автоматично після callback від PayKassa.
       </div>
     </section>
   </main>
@@ -214,9 +214,9 @@ async def health(request: web.Request) -> web.Response:
 
 async def payment_success(request: web.Request) -> web.Response:
     html = telonyx_page(
-        title="Оплата принята",
-        subtitle="Платёж успешно создан или завершён. После подтверждения PayKassa бот автоматически выдаст доступ в приватный канал.",
-        status="✅ Success / Успешная оплата",
+        title="Оплату прийнято",
+        subtitle="Платіж успішно створено або завершено. Після підтвердження PayKassa бот автоматично видасть доступ до приватного каналу.",
+        status="✅ Успішна оплата",
         accent="#22c55e",
     )
     return web.Response(text=html, content_type="text/html")
@@ -224,9 +224,9 @@ async def payment_success(request: web.Request) -> web.Response:
 
 async def payment_fail(request: web.Request) -> web.Response:
     html = telonyx_page(
-        title="Оплата не завершена",
-        subtitle="Платёж был отменён, не прошёл или истёк по времени. Вы можете вернуться в бот и создать новый счёт.",
-        status="⚠️ Failed / Сбой оплаты",
+        title="Оплату не завершено",
+        subtitle="Платіж було скасовано, не проведено або він закінчився за часом. Ви можете повернутися в бот і створити новий рахунок.",
+        status="⚠️ Помилка оплати",
         accent="#ef4444",
     )
     return web.Response(text=html, content_type="text/html")
@@ -255,7 +255,7 @@ async def paykassa_ipn(request: web.Request) -> web.Response:
 
         await grant_access(tx.telegram_user_id, tx.plan_code)
         lang = await get_user_lang(tx.telegram_user_id)
-        invite_url = await create_private_invite(bot, name=f"PayKassa {tx.telegram_user_id}")
+        invite_url = await create_private_invite(bot, lang=lang, name=f"PayKassa {tx.telegram_user_id}")
 
         await bot.send_message(
             chat_id=tx.telegram_user_id,

@@ -10,8 +10,21 @@ class Settings(BaseSettings):
 
     telegram_bot_token: str = Field(..., alias="TELEGRAM_BOT_TOKEN")
 
+    # Legacy-переменные оставлены для совместимости.
     telegram_private_channel_id: str = Field("", alias="TELEGRAM_PRIVATE_CHANNEL_ID")
     telegram_public_channel: str = Field("@telonyx_predict", alias="TELEGRAM_PUBLIC_CHANNEL")
+
+    # Языковые каналы. Если значение пустое — этот канал не обрабатывается.
+    telegram_private_channel_uk: str = Field("", alias="TELEGRAM_PRIVATE_CHANNEL_UK")
+    telegram_private_channel_en: str = Field("", alias="TELEGRAM_PRIVATE_CHANNEL_EN")
+    telegram_private_channel_ru: str = Field("", alias="TELEGRAM_PRIVATE_CHANNEL_RU")
+    telegram_public_channel_uk: str = Field("", alias="TELEGRAM_PUBLIC_CHANNEL_UK")
+    telegram_public_channel_en: str = Field("", alias="TELEGRAM_PUBLIC_CHANNEL_EN")
+    telegram_public_channel_ru: str = Field("", alias="TELEGRAM_PUBLIC_CHANNEL_RU")
+
+    default_language: str = Field("uk", alias="DEFAULT_LANGUAGE")
+    supported_languages_raw: str = Field("uk,en,ru", alias="SUPPORTED_LANGUAGES")
+
     telegram_bot_username: str = Field("telonyx_predict_bot", alias="TELEGRAM_BOT_USERNAME")
     public_channel_cta_enabled: bool = Field(True, alias="PUBLIC_CHANNEL_CTA_ENABLED")
     project_public_url: str = Field("https://predict.telonyx.app", alias="PROJECT_PUBLIC_URL")
@@ -85,6 +98,60 @@ class Settings(BaseSettings):
     thesportsdb_league_ids_raw: str = Field("4328,4335,4332,4331,4334,4337", alias="THESPORTSDB_LEAGUE_IDS")
     espn_enabled: bool = Field(True, alias="ESPN_ENABLED")
     espn_leagues_raw: str = Field("eng.1,esp.1,ita.1,ger.1,fra.1,ned.1,por.1,sco.1", alias="ESPN_LEAGUES")
+
+    @property
+    def supported_languages(self) -> List[str]:
+        """Список языков, которые может показывать бот."""
+        allowed = {"uk", "en", "ru"}
+        values = [x.strip().lower() for x in self.supported_languages_raw.split(",") if x.strip()]
+        result = [x for x in values if x in allowed]
+        return result or ["uk"]
+
+    def normalize_language(self, lang: str | None) -> str:
+        """Вернуть поддерживаемый язык или язык по умолчанию."""
+        value = (lang or "").strip().lower()
+        if value in self.supported_languages:
+            return value
+        default = self.default_language.strip().lower()
+        return default if default in self.supported_languages else self.supported_languages[0]
+
+    def public_channel_for(self, lang: str) -> str:
+        """Публичный канал для языка. Пустая строка означает: не публиковать."""
+        value = {
+            "uk": self.telegram_public_channel_uk or self.telegram_public_channel,
+            "en": self.telegram_public_channel_en,
+            "ru": self.telegram_public_channel_ru,
+        }.get(self.normalize_language(lang), "")
+        return value.strip()
+
+    def private_channel_for(self, lang: str) -> str:
+        """Приватный канал для языка. Пустая строка означает: доступ недоступен."""
+        value = {
+            "uk": self.telegram_private_channel_uk or self.telegram_private_channel_id,
+            "en": self.telegram_private_channel_en,
+            "ru": self.telegram_private_channel_ru,
+        }.get(self.normalize_language(lang), "")
+        return value.strip()
+
+    @property
+    def active_public_languages(self) -> List[str]:
+        """Языки, для которых заполнены публичные каналы."""
+        return [lang for lang in self.supported_languages if self.public_channel_for(lang)]
+
+    @property
+    def active_private_languages(self) -> List[str]:
+        """Языки, для которых заполнены приватные каналы."""
+        return [lang for lang in self.supported_languages if self.private_channel_for(lang)]
+
+    @property
+    def render_languages(self) -> List[str]:
+        """Языки, для которых нужно подготовить тексты прогнозов."""
+        langs = []
+        for lang in self.supported_languages:
+            if self.public_channel_for(lang) or self.private_channel_for(lang):
+                langs.append(lang)
+        return langs or [self.normalize_language(self.default_language)]
+
 
     @property
     def allowed_countries(self) -> List[str]:

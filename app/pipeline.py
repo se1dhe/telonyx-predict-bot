@@ -19,7 +19,7 @@ from app.services.draftkings_resolver import DraftKingsResolver
 logger = logging.getLogger(__name__)
 
 class DailyPipeline:
-    """Источник данных → фильтры → новости → AI → база."""
+    """Джерело даних → фільтри → новини → AI → база."""
     def __init__(self) -> None:
         self.settings = get_settings()
         self.provider = get_data_provider()
@@ -28,29 +28,29 @@ class DailyPipeline:
         self.rule_based = RuleBasedSelector()
         self.draftkings = DraftKingsResolver()
 
-    async def run_for_today(self, force: bool = False) -> tuple[str, list[str]]:
+    async def run_for_today(self, force: bool = False) -> tuple[dict[str, str], dict[str, list[str]]]:
         today = datetime.now(ZoneInfo(self.settings.tz)).date()
         return await self.run_for_date(today, force=force)
 
-    async def run_for_date(self, target_date: date, force: bool = False) -> tuple[str, list[str]]:
+    async def run_for_date(self, target_date: date, force: bool = False) -> tuple[dict[str, str], dict[str, list[str]]]:
         date_key = target_date.isoformat()
         provider_name = self.settings.provider_normalized
         if not force:
             cached = await self._load_existing_texts(date_key, provider_name)
             if cached:
                 return cached
-        debug = [f"📅 Дата: {date_key}", f"🧩 Источник: {provider_name}"]
+        debug = [f"📅 Дата: {date_key}", f"🧩 Джерело: {provider_name}"]
         try:
             logger.info("Pipeline: получаю матчи от источника %s на дату %s", provider_name, date_key)
             raw_fixtures = await self.provider.fixtures_by_date(target_date)
             logger.info("Pipeline: источник вернул матчей: %s", len(raw_fixtures))
         except Exception as exc:
-            summary = f"⚠️ Не удалось получить матчи из источника {provider_name}.\n\nОшибка: <code>{escape(str(exc)[:1000])}</code>"
+            summary = f"⚠️ Не вдалося отримати матчі з джерела {provider_name}.\n\nПомилка: <code>{escape(str(exc)[:1000])}</code>"
             await self._save_daily_run(date_key, summary, 0)
-            return summary, []
-        debug.append(f"📦 Матчей от источника: {len(raw_fixtures)}")
+            return self._single_language_result(summary, [])
+        debug.append(f"📦 Матчів від джерела: {len(raw_fixtures)}")
         raw_fixtures = self._filter_raw_fixtures(raw_fixtures)
-        debug.append(f"🔎 После первичного фильтра: {len(raw_fixtures)}")
+        debug.append(f"🔎 Після первинного фільтра: {len(raw_fixtures)}")
         contexts: list[CandidateContext] = []
         errors, rejected = [], []
         for fixture in raw_fixtures[:self.settings.max_raw_events]:
@@ -63,20 +63,20 @@ class DailyPipeline:
                 contexts.append(ctx)
             except Exception as exc:
                 errors.append(f"{safe_fixture_title(fixture)}: {str(exc)[:250]}")
-                logger.exception("Ошибка при сборе контекста матча")
+                logger.exception("Помилка під час збору контексту матчу")
         contexts.sort(key=lambda c: c.pre_ai_score, reverse=True)
         contexts = contexts[:self.settings.max_candidates_for_ai]
-        debug += [f"🧠 Контекстов собрано: {len(contexts)}", f"🗑 Отсеяно по score: {len(rejected)}", f"❌ Ошибок при сборе: {len(errors)}"]
+        debug += [f"🧠 Контекстів зібрано: {len(contexts)}", f"🗑 Відсіяно за score: {len(rejected)}", f"❌ Помилок під час збору: {len(errors)}"]
         if errors:
-            debug.append("\n<b>Первые ошибки:</b>")
+            debug.append("\n<b>Перші помилки:</b>")
             debug += [f"• {escape(x)}" for x in errors[:5]]
         if rejected:
-            debug.append("\n<b>Первые отсеянные:</b>")
+            debug.append("\n<b>Перші відсіяні:</b>")
             debug += [f"• {escape(x)}" for x in rejected[:5]]
         if not contexts:
-            summary = "⚠️ На сегодня не найдено достаточно качественных матчей.\n\n<b>Диагностика:</b>\n" + "\n".join(debug)
+            summary = "⚠️ На сьогодні не знайдено достатньо якісних матчів.\n\n<b>Діагностика:</b>\n" + "\n".join(debug)
             await self._save_daily_run(date_key, summary, 0)
-            return summary, []
+            return self._no_quality_matches_result()
         if self.settings.ai_enabled:
             try:
                 logger.info("Pipeline: отправляю %s кандидатов в OpenAI", len(contexts))
@@ -92,13 +92,13 @@ class DailyPipeline:
                     ai_response = await self.rule_based.select_gold_matches(contexts)
                 else:
                     summary = (
-                        "⚠️ AI не смог выбрать матчи.\n\n"
-                        "<b>Диагностика:</b>\n"
+                        "⚠️ AI не зміг вибрати матчі.\n\n"
+                        "<b>Діагностика:</b>\n"
                         + "\n".join(debug)
-                        + f"\n\n<b>Ошибка AI:</b>\n<code>{safe_error}</code>"
+                        + f"\n\n<b>Помилка AI:</b>\n<code>{safe_error}</code>"
                     )
                     await self._save_daily_run(date_key, summary, 0)
-                    return summary, []
+                    return self._single_language_result(summary, [])
         else:
             logger.info("Pipeline: OpenAI отключён, использую локальный rule-based selector")
             debug.append("🧠 OpenAI: отключён, используется локальный алгоритм")
@@ -107,31 +107,58 @@ class DailyPipeline:
         picks = self._enrich_picks_with_context(ai_response.selected, contexts)
         await self._resolve_bookmaker_links(picks)
         self._log_selected_picks(picks)
-        debug.append(f"✅ Выбрано матчей: {len(picks)}")
+        debug.append(f"✅ Вибрано матчів: {len(picks)}")
         if not picks:
-            summary = "⚠️ AI не выбрал ни одного матча.\n\n<b>Диагностика:</b>\n" + "\n".join(debug)
+            summary = "⚠️ AI не вибрав жодного матчу.\n\n<b>Діагностика:</b>\n" + "\n".join(debug)
             if ai_response.rejected_summary:
-                summary += "\n\n<b>Что AI отклонил:</b>\n" + "\n".join(f"• {escape(x)}" for x in ai_response.rejected_summary[:8])
+                summary += "\n\n<b>AI rejected:</b>\n" + "\n".join(f"• {escape(x)}" for x in ai_response.rejected_summary[:8])
             await self._save_daily_run(date_key, summary, 0)
-            return summary, []
+            return self._no_quality_matches_result()
         ctx_by_id = {ctx.fixture_id: ctx for ctx in contexts}
-        summary = render_daily_summary(
-            picks,
-            ai_response.rejected_summary,
-            provider=provider_name,
-            contexts_by_id=ctx_by_id,
-        )
+
+        # Один анализ — несколько языковых рендеров.
+        summaries: dict[str, str] = {}
+        details_by_lang: dict[str, list[str]] = {}
+
+        for lang in self.settings.render_languages:
+            summary = render_daily_summary(
+                picks,
+                ai_response.rejected_summary,
+                provider=provider_name,
+                contexts_by_id=ctx_by_id,
+                lang=lang,
+            )
+
+            if self.settings.show_tech_diagnostics:
+                summary += "\n\n<b>Technical diagnostics:</b>\n" + "\n".join(debug)
+
+            summaries[lang] = summary
+            details_by_lang[lang] = [render_pick_detail(p, ctx_by_id.get(p.fixture_id), lang=lang) for p in picks]
 
         # Техническую диагностику не показываем пользователю, только в Railway Logs.
         logger.info("Техническая диагностика daily run:\n%s", "\n".join(debug))
 
-        if self.settings.show_tech_diagnostics:
-            summary += "\n\n<b>Техническая диагностика:</b>\n" + "\n".join(debug)
+        uk_summary = summaries.get("uk") or next(iter(summaries.values()))
+        uk_details = details_by_lang.get("uk") or next(iter(details_by_lang.values()))
+        await self._save_predictions(date_key, picks, uk_details, contexts, provider_name)
+        await self._save_daily_run(date_key, uk_summary, len(picks))
+        return summaries, details_by_lang
 
-        details = [render_pick_detail(p, ctx_by_id.get(p.fixture_id)) for p in picks]
-        await self._save_predictions(date_key, picks, details, contexts, provider_name)
-        await self._save_daily_run(date_key, summary, len(picks))
-        return summary, details
+
+    def _single_language_result(self, summary: str, details: list[str]) -> tuple[dict[str, str], dict[str, list[str]]]:
+        """Завернуть служебный одноязычный ответ в новый формат для всех активных языков."""
+        return (
+            {lang: summary for lang in self.settings.render_languages},
+            {lang: details for lang in self.settings.render_languages},
+        )
+
+    def _no_quality_matches_result(self) -> tuple[dict[str, str], dict[str, list[str]]]:
+        """Языковой ответ, когда качественных матчей нет."""
+        summaries = {
+            lang: render_daily_summary([], [], provider=self.settings.provider_normalized, contexts_by_id={}, lang=lang)
+            for lang in self.settings.render_languages
+        }
+        return summaries, {lang: [] for lang in self.settings.render_languages}
 
     def _split_pick_teams(self, pick: AiPick) -> tuple[str, str]:
         """Получить home/away из match_title."""
@@ -163,7 +190,7 @@ class DailyPipeline:
                 logger.info("Bookmaker URL not found for %s", pick.match_title)
 
     def _log_selected_picks(self, picks: list[AiPick]) -> None:
-        """Писать в Railway Logs reasoning/уверенность по выбранным матчам."""
+        """Писать в Railway Logs reasoning/уверенность по выбранным матчум."""
         if not self.settings.log_ai_reasoning:
             return
 
@@ -193,7 +220,7 @@ class DailyPipeline:
         return picks
 
     def _filter_raw_fixtures(self, fixtures: list) -> list:
-        """Первичный фильтр матчей.
+        """Первинний фільтр матчів.
 
         Поддерживает оба формата:
         - LOCAL dataclass / RawFixture-like object;
@@ -239,12 +266,12 @@ class DailyPipeline:
         result.sort(key=lambda f: f.get("fixture", {}).get("timestamp", 9999999999) if isinstance(f, dict) else (getattr(f, "timestamp", 9999999999) or 9999999999))
         return result[: self.settings.max_raw_events]
 
-    async def _load_existing_texts(self, date_key: str, provider_name: str) -> tuple[str, list[str]] | None:
+    async def _load_existing_texts(self, date_key: str, provider_name: str) -> tuple[dict[str, str], dict[str, list[str]]] | None:
         async with SessionLocal() as session:
             run = (await session.execute(select(DailyRun).where(DailyRun.date_key == date_key))).scalar_one_or_none()
             preds = (await session.execute(select(Prediction).where(Prediction.date_key == date_key).where(Prediction.provider == provider_name).order_by(Prediction.ai_rank_score.desc()))).scalars().all()
         if run and preds:
-            return run.summary_text, [p.rendered_text for p in preds]
+            return self._single_language_result(run.summary_text, [p.rendered_text for p in preds])
         return None
 
     async def _save_daily_run(self, date_key: str, summary: str, count: int) -> None:

@@ -6,9 +6,9 @@ from app.db import SessionLocal
 from app.models import BotUser, Transaction
 
 PLANS = {
-    "1d": {"days": 1, "label_ru": "1 день", "label_en": "1 day"},
-    "3d": {"days": 3, "label_ru": "3 дня", "label_en": "3 days"},
-    "30d": {"days": 30, "label_ru": "1 месяц", "label_en": "1 month"},
+    "1d": {"days": 1, "label_uk": "1 день", "label_en": "1 day", "label_ru": "1 день"},
+    "3d": {"days": 3, "label_uk": "3 дні", "label_en": "3 days", "label_ru": "3 дня"},
+    "30d": {"days": 30, "label_uk": "1 місяць", "label_en": "1 month", "label_ru": "1 месяц"},
 }
 
 def plan_days(plan_code: str) -> int:
@@ -35,7 +35,7 @@ async def get_or_create_user(tg_user) -> BotUser:
                 telegram_user_id=str(tg_user.id),
                 username=tg_user.username or "",
                 first_name=tg_user.first_name or "",
-                language_code="",
+                language_code="uk",
             )
             session.add(user)
         else:
@@ -62,7 +62,7 @@ async def get_user_lang(telegram_user_id: int | str) -> str:
         user = (await session.execute(
             select(BotUser).where(BotUser.telegram_user_id == str(telegram_user_id))
         )).scalar_one_or_none()
-        return user.language_code if user and user.language_code in {"ru", "en"} else "ru"
+        return user.language_code if user and user.language_code in {"uk", "en", "ru"} else "uk"
 
 async def grant_access(telegram_user_id: int | str, plan_code: str) -> datetime:
     days = plan_days(plan_code)
@@ -74,7 +74,7 @@ async def grant_access(telegram_user_id: int | str, plan_code: str) -> datetime:
         )).scalar_one_or_none()
 
         if not user:
-            user = BotUser(telegram_user_id=str(telegram_user_id), language_code="ru")
+            user = BotUser(telegram_user_id=str(telegram_user_id), language_code="uk")
             session.add(user)
             await session.flush()
 
