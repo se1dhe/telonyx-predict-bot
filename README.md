@@ -571,3 +571,28 @@ pay:paykassa:3d
 pay:stars:30d
 pay:paykassa:30d
 ```
+
+
+## V25: PayKassa no-JSON response fix
+
+Исправлена ошибка:
+```text
+JSONDecodeError: Expecting value: line 1 column 1 (char 0)
+```
+
+Причина:
+PayKassa вернула не JSON, а HTML/текст. Такое обычно происходит при неверном `PAYKASSA_SCI_ID`,
+неподтверждённом домене, неактивном магазине, неверном `PAYKASSA_SYSTEM` или несовпадении test mode.
+
+Что изменено:
+- PayKassa ответ теперь сначала читается как raw text;
+- raw response логируется в Railway Logs;
+- поддержаны JSON, URL-encoded и plain URL ответы;
+- пользователь больше не видит падение обработчика;
+- если счёт не создан, бот показывает нормальное сообщение и оставляет кнопки оплаты.
+
+Для диагностики в Railway Logs теперь ищи строки:
+```text
+PayKassa create_order request payload
+PayKassa create_order HTTP response
+```

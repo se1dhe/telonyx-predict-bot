@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import json
 import uuid
 from datetime import datetime
@@ -27,6 +28,7 @@ from app.services.subscriptions import (
 )
 
 router = Router()
+logger = logging.getLogger(__name__)
 
 
 @router.message(CommandStart())
@@ -156,11 +158,21 @@ async def pay_paykassa(callback: CallbackQuery) -> None:
 
     amount = get_price_usdt(settings, plan_code)
     order_id = f"pk_{callback.from_user.id}_{plan_code}_{uuid.uuid4().hex[:12]}"
-    payment_url = await PayKassaClient().create_order(
-        amount=amount,
-        order_id=order_id,
-        comment=f"TelOnyx Predict {plan_code} user {callback.from_user.id}",
-    )
+    try:
+        payment_url = await PayKassaClient().create_order(
+            amount=amount,
+            order_id=order_id,
+            comment=f"TelOnyx Predict {plan_code} user {callback.from_user.id}",
+        )
+    except Exception:
+        logger.exception("PayKassa invoice creation failed for user=%s plan=%s", callback.from_user.id, plan_code)
+        await callback.message.edit_text(
+            t(lang, "paykassa_error"),
+            reply_markup=payment_keyboard(lang, plan_code),
+            disable_web_page_preview=True,
+        )
+        await callback.answer()
+        return
 
     await create_transaction(
         telegram_user_id=callback.from_user.id,
