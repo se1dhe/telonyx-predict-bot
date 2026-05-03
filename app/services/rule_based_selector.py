@@ -42,8 +42,13 @@ def build_pick(ctx: CandidateContext) -> AiPick:
     over15_rate = (h.over15 + a.over15) / total_matches
     over25_rate = (h.over25 + a.over25) / total_matches
 
-    h_ppm = h.points / max(1, h.matches)
-    a_ppm = a.points / max(1, a.matches)
+    # TeamMetrics не хранит points отдельным полем.
+    # Считаем очки из W/D/L: победа = 3, ничья = 1.
+    h_points = h.wins * 3 + h.draws
+    a_points = a.wins * 3 + a.draws
+
+    h_ppm = h_points / max(1, h.matches)
+    a_ppm = a_points / max(1, a.matches)
     h_goal_avg = h.goals_for / max(1, h.matches)
     a_goal_avg = a.goals_for / max(1, a.matches)
     h_concede_avg = h.goals_against / max(1, h.matches)

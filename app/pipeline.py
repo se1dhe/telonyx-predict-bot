@@ -74,32 +74,32 @@ class DailyPipeline:
             summary = "⚠️ На сегодня не найдено достаточно качественных матчей.\n\n<b>Диагностика:</b>\n" + "\n".join(debug)
             await self._save_daily_run(date_key, summary, 0)
             return summary, []
-        try:
-            if self.settings.ai_enabled:
+        if self.settings.ai_enabled:
+            try:
                 logger.info("Pipeline: отправляю %s кандидатов в OpenAI", len(contexts))
                 ai_response = await self.ai.select_gold_matches(contexts)
                 logger.info("Pipeline: OpenAI вернул выбранных матчей: %s", len(ai_response.selected))
-            else:
-                logger.info("Pipeline: OpenAI отключён, использую локальный rule-based selector")
-                debug.append("🧠 OpenAI: отключён, используется локальный алгоритм")
-                ai_response = await self.rule_based.select_gold_matches(contexts)
-        except Exception as exc:
-            safe_error = escape(str(exc)[:1000])
+            except Exception as exc:
+                safe_error = escape(str(exc)[:1000])
 
-            if self.settings.ai_fallback_on_error:
-                logger.exception("OpenAI не смог выбрать матчи, включаю rule-based fallback")
-                debug.append("🧠 OpenAI: ошибка, используется локальный fallback")
-                debug.append(f"⚠️ OpenAI error: <code>{safe_error}</code>")
-                ai_response = await self.rule_based.select_gold_matches(contexts)
-            else:
-                summary = (
-                    "⚠️ AI не смог выбрать матчи.\n\n"
-                    "<b>Диагностика:</b>\n"
-                    + "\n".join(debug)
-                    + f"\n\n<b>Ошибка AI:</b>\n<code>{safe_error}</code>"
-                )
-                await self._save_daily_run(date_key, summary, 0)
-                return summary, []
+                if self.settings.ai_fallback_on_error:
+                    logger.exception("OpenAI не смог выбрать матчи, включаю rule-based fallback")
+                    debug.append("🧠 OpenAI: ошибка, используется локальный fallback")
+                    debug.append(f"⚠️ OpenAI error: <code>{safe_error}</code>")
+                    ai_response = await self.rule_based.select_gold_matches(contexts)
+                else:
+                    summary = (
+                        "⚠️ AI не смог выбрать матчи.\n\n"
+                        "<b>Диагностика:</b>\n"
+                        + "\n".join(debug)
+                        + f"\n\n<b>Ошибка AI:</b>\n<code>{safe_error}</code>"
+                    )
+                    await self._save_daily_run(date_key, summary, 0)
+                    return summary, []
+        else:
+            logger.info("Pipeline: OpenAI отключён, использую локальный rule-based selector")
+            debug.append("🧠 OpenAI: отключён, используется локальный алгоритм")
+            ai_response = await self.rule_based.select_gold_matches(contexts)
 
         picks = self._enrich_picks_with_context(ai_response.selected, contexts)
         debug.append(f"✅ Выбрано матчей: {len(picks)}")

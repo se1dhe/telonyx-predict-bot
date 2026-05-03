@@ -182,3 +182,25 @@ Winrate считается так:
 ```
 
 Возвраты по форе 0 / DNB не считаются ни плюсом, ни минусом.
+
+
+## V10: фикс rule-based selector
+
+Исправлена ошибка:
+
+```text
+AttributeError: 'TeamMetrics' object has no attribute 'points'
+```
+
+Причина:
+`TeamMetrics` хранит `wins/draws/losses`, но не хранит поле `points`.
+
+Исправление:
+локальный алгоритм теперь считает очки сам:
+
+```text
+points = wins * 3 + draws
+```
+
+Также исправлена логика fallback:
+если `AI_ENABLED=false`, ошибка локального алгоритма больше не маркируется как ошибка OpenAI и не запускается повторно.
