@@ -31,6 +31,10 @@ class Settings(BaseSettings):
 
     web_host: str = Field("0.0.0.0", alias="WEB_HOST")
     web_port: int = Field(8080, alias="PORT")
+    subscription_check_interval_minutes: int = Field(15, alias="SUBSCRIPTION_CHECK_INTERVAL_MINUTES")
+    subscription_kick_enabled: bool = Field(True, alias="SUBSCRIPTION_KICK_ENABLED")
+    subscription_notify_enabled: bool = Field(True, alias="SUBSCRIPTION_NOTIFY_ENABLED")
+    styled_buttons_enabled: bool = Field(True, alias="STYLED_BUTTONS_ENABLED")
     openai_api_key: str = Field(..., alias="OPENAI_API_KEY")
     openai_model: str = Field("gpt-5.5", alias="OPENAI_MODEL")
     ai_enabled: bool = Field(True, alias="AI_ENABLED")

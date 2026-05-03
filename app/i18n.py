@@ -35,6 +35,10 @@ TEXTS = {
         "invite": "🔗 Ваша ссылка в приватный канал:\n{url}\n\nСсылка одноразовая и действует ограниченное время.",
         "invoice_title": "Доступ TelOnyx Predict",
         "invoice_desc": "Доступ в приватный канал TelOnyx Predict на {days} дн.",
+        "subscription_expire_24h": "⏰ Ваш доступ в приватный канал закончится примерно через 24 часа. Продлите подписку, чтобы не потерять прогнозы.",
+        "subscription_expire_5h": "⏰ Ваш доступ в приватный канал закончится примерно через 5 часов.",
+        "subscription_expire_1h": "⚠️ Ваш доступ закончится примерно через 1 час. После окончания бот удалит вас из приватного канала.",
+        "subscription_expired": "🔒 Ваша подписка закончилась. Доступ в приватный канал остановлен. Вы можете продлить доступ в меню бота.",
     },
     "en": {
         "choose_lang": "🌍 Choose language / Выберите язык",
@@ -70,6 +74,10 @@ TEXTS = {
         "invite": "🔗 Your private channel invite link:\n{url}\n\nThe link is single-use and time-limited.",
         "invoice_title": "TelOnyx Predict Access",
         "invoice_desc": "Access to TelOnyx Predict private channel for {days} days.",
+        "subscription_expire_24h": "⏰ Your private channel access expires in about 24 hours. Renew to keep receiving picks.",
+        "subscription_expire_5h": "⏰ Your private channel access expires in about 5 hours.",
+        "subscription_expire_1h": "⚠️ Your access expires in about 1 hour. After expiration the bot will remove you from the private channel.",
+        "subscription_expired": "🔒 Your subscription has expired. Private channel access has been stopped. You can renew from the bot menu.",
     },
 }
 

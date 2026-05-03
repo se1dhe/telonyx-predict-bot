@@ -80,6 +80,10 @@ async def grant_access(telegram_user_id: int | str, plan_code: str) -> datetime:
 
         base = user.active_until if user.active_until and user.active_until > now else now
         user.active_until = base + timedelta(days=days)
+        user.notified_24h_at = None
+        user.notified_5h_at = None
+        user.notified_1h_at = None
+        user.kicked_at = None
         user.updated_at = now
         await session.commit()
         return user.active_until

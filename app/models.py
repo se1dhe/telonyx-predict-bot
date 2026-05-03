@@ -80,6 +80,10 @@ class BotUser(Base):
     first_name: Mapped[str] = mapped_column(String(255), default="")
     language_code: Mapped[str] = mapped_column(String(8), default="")
     active_until: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    notified_24h_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    notified_5h_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    notified_1h_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    kicked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 

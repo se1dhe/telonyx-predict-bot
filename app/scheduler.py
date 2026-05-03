@@ -12,6 +12,7 @@ from app.config import get_settings
 from app.pipeline import DailyPipeline
 from app.result_checker import ResultChecker
 from app.services.channel_render import private_summary, public_summary_from_private
+from app.services.subscription_guard import check_subscriptions
 
 
 logger = logging.getLogger(__name__)
@@ -158,6 +159,14 @@ async def send_daily_stats_report(bot: Bot) -> None:
         )
 
 
+async def check_subscription_access(bot: Bot) -> None:
+    """Проверить подписки, уведомить и удалить истёкших пользователей."""
+    try:
+        await check_subscriptions(bot)
+    except Exception:
+        logger.exception("Ошибка при проверке подписок")
+
+
 def setup_scheduler(bot: Bot) -> AsyncIOScheduler:
     """Настроить расписание."""
     settings = get_settings()
@@ -189,6 +198,15 @@ def setup_scheduler(bot: Bot) -> AsyncIOScheduler:
         minute=settings.daily_stats_minute,
         args=[bot],
         id="daily_stats_report",
+        replace_existing=True,
+    )
+
+    scheduler.add_job(
+        check_subscription_access,
+        trigger="interval",
+        minutes=settings.subscription_check_interval_minutes,
+        args=[bot],
+        id="subscription_guard",
         replace_existing=True,
     )
 

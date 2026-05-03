@@ -113,6 +113,68 @@ def normalize_bet_label(label: str) -> str:
     return value
 
 
+
+def normalize_bet_label_en(label: str) -> str:
+    """English version of a bet label."""
+    value = normalize_bet_label(label)
+    replacements = {
+        "Тотал больше 1.5 гола": "Over 1.5 total goals",
+        "Тотал больше 2.5 гола": "Over 2.5 total goals",
+        "Обе команды забьют — Да": "Both Teams To Score — Yes",
+        "фора 0 / Draw No Bet": "Draw No Bet / handicap 0",
+        "Победа хозяев с форой 0": "Home Draw No Bet",
+        "Победа гостей с форой 0": "Away Draw No Bet",
+    }
+    for old, new in replacements.items():
+        value = value.replace(old, new)
+    return value
+
+
+def bet_instruction_en(p: AiPick) -> str:
+    """English instruction for sportsbook market."""
+    code = p.main_bet_code
+    if code == "OVER_1_5":
+        return "In the sportsbook line, find: <b>Total Goals → Over 1.5</b>."
+    if code == "OVER_2_5":
+        return "In the sportsbook line, find: <b>Total Goals → Over 2.5</b>."
+    if code == "BTTS_YES":
+        return "Find: <b>Both Teams To Score → Yes</b>."
+    if code == "HOME_DOUBLE_CHANCE":
+        return "Find: <b>Double Chance → 1X</b>."
+    if code == "AWAY_DOUBLE_CHANCE":
+        return "Find: <b>Double Chance → X2</b>."
+    if code == "HOME_OR_DRAW_OVER_1_5":
+        return "Find combo market: <b>1X + Over 1.5</b>. If unavailable, safer choice is just <b>Over 1.5</b>."
+    if code == "AWAY_OR_DRAW_OVER_1_5":
+        return "Find combo market: <b>X2 + Over 1.5</b>. If unavailable, safer choice is just <b>Over 1.5</b>."
+    if code == "HOME_DNB":
+        return "Find: <b>Home Draw No Bet</b> or <b>handicap 0</b>. Draw usually means void/refund."
+    if code == "AWAY_DNB":
+        return "Find: <b>Away Draw No Bet</b> or <b>handicap 0</b>. Draw usually means void/refund."
+    return "If this exact market is not available, skip the match instead of replacing the bet randomly."
+
+
+def risk_text_en(risk: str) -> str:
+    value = str(risk).lower()
+    if "низ" in value or "low" in value:
+        return "low"
+    if "выс" in value or "high" in value:
+        return "high"
+    if "сред" in value or "medium" in value:
+        return "medium"
+    return "moderate"
+
+
+def confidence_text_en(confidence: int) -> str:
+    if confidence >= 75:
+        return "high"
+    if confidence >= 60:
+        return "medium"
+    if confidence >= 45:
+        return "moderate"
+    return "low"
+
+
 def bet_instruction(p: AiPick) -> str:
     """Объяснение, что именно искать у букмекера."""
     code = p.main_bet_code
@@ -217,12 +279,15 @@ def render_daily_summary(
         )
 
     lines = [
-        "🏆 <b>Футбольные прогнозы на сегодня</b>",
+        "🏆 <b>Футбольные прогнозы на сегодня / Football picks for today</b>",
         "",
         "Я отобрал только матчи, где статистика выглядит достаточно чисто.",
-        "Ниже — что именно искать в линии букмекера.",
+        "I selected only matches where the data looks clean enough.",
         "",
-        f"📌 <b>Матчей в отборе:</b> {len(picks)}",
+        "Ниже — что именно искать в линии букмекера.",
+        "Below you can see the exact sportsbook market to look for.",
+        "",
+        f"📌 <b>Матчей в отборе / Selected matches:</b> {len(picks)}",
         "",
     ]
 
@@ -235,13 +300,13 @@ def render_daily_summary(
         lines.extend(
             [
                 f"<b>{i}. {html_escape(p.match_title)}</b>",
-                f"🗓 <b>Дата/время:</b> {html_escape(match_time)}",
-                f"🏟 <b>Турнир:</b> {html_escape(league)}",
-                f"✅ <b>Что ставить:</b> {html_escape(bet)}",
-                f"🎯 <b>Ожидаемый счёт:</b> {html_escape(p.expected_score)}",
-                f"{risk_emoji(p.risk_level)} <b>Риск:</b> {html_escape(p.risk_level)}",
-                f"🧠 <b>Уверенность:</b> {p.confidence}/100 ({confidence_text(p.confidence)})",
-                f"🔗 <a href=\"{html_escape(p.tracking_url)}\">Открыть матч</a>",
+                f"🗓 <b>Дата/время / Date & time:</b> {html_escape(match_time)}",
+                f"🏟 <b>Турнир / Competition:</b> {html_escape(league)}",
+                f"✅ <b>Ставка / Pick:</b> {html_escape(bet)} / {html_escape(normalize_bet_label_en(p.main_bet_label))}",
+                f"🎯 <b>Ожидаемый счёт / Expected score:</b> {html_escape(p.expected_score)}",
+                f"{risk_emoji(p.risk_level)} <b>Риск / Risk:</b> {html_escape(p.risk_level)} / {risk_text_en(p.risk_level)}",
+                f"🧠 <b>Уверенность / Confidence:</b> {p.confidence}/100 ({confidence_text(p.confidence)} / {confidence_text_en(p.confidence)})",
+                f"🔗 <a href=\"{html_escape(p.tracking_url)}\">Открыть матч / Open match</a>",
                 bookmaker_link_line(p.match_title, getattr(p, "bookmaker_url", "")),
                 "",
             ]
@@ -249,11 +314,11 @@ def render_daily_summary(
 
     lines.extend(
         [
-            "💰 <b>Как использовать:</b>",
-            "• не ставь весь банк на один матч;",
-            "• не заменяй рынок на другой, если нужной ставки нет;",
-            "• если коэффициент сильно просел — лучше пропустить;",
-            "• это аналитика, а не гарантия выигрыша.",
+            "💰 <b>Как использовать / How to use:</b>",
+            "• не ставь весь банк на один матч / do not risk your whole bankroll on one match;",
+            "• не заменяй рынок на другой / do not replace the market randomly;",
+            "• если коэффициент сильно просел — лучше пропустить / if odds dropped hard, it is better to skip;",
+            "• это аналитика, а не гарантия выигрыша / analytics only, no guaranteed profit.",
         ]
     )
 
@@ -261,57 +326,57 @@ def render_daily_summary(
 
 
 def render_pick_detail(p: AiPick, ctx: CandidateContext | None = None) -> str:
-    """Детальный прогноз по одному матчу."""
+    """Детальный прогноз по одному матчу в формате RU/EN."""
     match_time = format_match_time(ctx)
     league = f"{ctx.country} • {ctx.league_name}" if ctx else "турнир не указан источником"
     bet = normalize_bet_label(p.main_bet_label)
     safe_bet = normalize_bet_label(p.safe_bet_label)
     risky_bet = normalize_bet_label(p.risky_bet_label)
 
-    warnings = ""
     data_block = ""
     if ctx:
         h = ctx.home_metrics
         a = ctx.away_metrics
         data_block = (
-            "\n\n📈 <b>Коротко по цифрам:</b>\n"
-            f"• {html_escape(ctx.home_team)}: {h.wins}-{h.draws}-{h.losses}, голы {h.goals_for}:{h.goals_against}, ТБ1.5 {h.over15}/{max(1, h.matches)}, ОЗ {h.btts}/{max(1, h.matches)}\n"
-            f"• {html_escape(ctx.away_team)}: {a.wins}-{a.draws}-{a.losses}, голы {a.goals_for}:{a.goals_against}, ТБ1.5 {a.over15}/{max(1, a.matches)}, ОЗ {a.btts}/{max(1, a.matches)}"
+            "\n\n📈 <b>Коротко по цифрам / Key numbers:</b>\n"
+            f"• {html_escape(ctx.home_team)}: {h.wins}-{h.draws}-{h.losses}, goals {h.goals_for}:{h.goals_against}, O1.5 {h.over15}/{max(1, h.matches)}, BTTS {h.btts}/{max(1, h.matches)}\n"
+            f"• {html_escape(ctx.away_team)}: {a.wins}-{a.draws}-{a.losses}, goals {a.goals_for}:{a.goals_against}, O1.5 {a.over15}/{max(1, a.matches)}, BTTS {a.btts}/{max(1, a.matches)}"
         )
 
     return (
         f"⚽️ <b>{html_escape(p.match_title)}</b>\n"
-        f"🗓 <b>Дата/время:</b> {html_escape(match_time)}\n"
-        f"🏟 <b>Турнир:</b> {html_escape(league)}\n\n"
-        f"✅ <b>Основная ставка:</b> {html_escape(bet)}\n"
-        f"📌 {bet_instruction(p)}\n\n"
-        f"🛡 <b>Более осторожно:</b> {html_escape(safe_bet)}\n"
-        f"🔥 <b>Рискованнее:</b> {html_escape(risky_bet)}\n"
-        f"{risk_emoji(p.risk_level)} <b>Риск:</b> {html_escape(p.risk_level)}\n"
-        f"🧠 <b>Уверенность:</b> {p.confidence}/100 ({confidence_text(p.confidence)})\n"
-        f"🎯 <b>Ожидаемый счёт:</b> {html_escape(p.expected_score)}\n\n"
-        f"📊 <b>Кто ближе к победе:</b> {html_escape(p.predicted_winner)}\n"
-        f"🥅 <b>Кто вероятнее забьёт:</b> {html_escape(p.who_should_score)}\n\n"
-        f"💎 <b>Почему матч в отборе:</b>\n{html_escape(compact_reason(p.why_this_match_is_gold, 520))}\n\n"
-        f"🧠 <b>Разбор:</b>\n{html_escape(compact_reason(p.reasoning, 900))}"
-        f"{data_block}"
-        f"🔗 <a href=\"{html_escape(p.tracking_url)}\">Открыть матч / проверить результат</a>\n"
+        f"🗓 <b>Дата/время / Date & time:</b> {html_escape(match_time)}\n"
+        f"🏟 <b>Турнир / Competition:</b> {html_escape(league)}\n\n"
+        f"✅ <b>Основная ставка / Main pick:</b> {html_escape(bet)} / {html_escape(normalize_bet_label_en(p.main_bet_label))}\n"
+        f"📌 RU: {bet_instruction(p)}\n"
+        f"📌 EN: {bet_instruction_en(p)}\n\n"
+        f"🛡 <b>Осторожнее / Safer:</b> {html_escape(safe_bet)} / {html_escape(normalize_bet_label_en(p.safe_bet_label))}\n"
+        f"🔥 <b>Рискованнее / Riskier:</b> {html_escape(risky_bet)} / {html_escape(normalize_bet_label_en(p.risky_bet_label))}\n"
+        f"{risk_emoji(p.risk_level)} <b>Риск / Risk:</b> {html_escape(p.risk_level)} / {risk_text_en(p.risk_level)}\n"
+        f"🧠 <b>Уверенность / Confidence:</b> {p.confidence}/100 ({confidence_text(p.confidence)} / {confidence_text_en(p.confidence)})\n"
+        f"🎯 <b>Ожидаемый счёт / Expected score:</b> {html_escape(p.expected_score)}\n\n"
+        f"📊 <b>Кто ближе к победе / More likely winner:</b> {html_escape(p.predicted_winner)}\n"
+        f"🥅 <b>Кто вероятнее забьёт / More likely to score:</b> {html_escape(p.who_should_score)}\n\n"
+        f"💎 <b>Почему матч в отборе / Why selected:</b>\n{html_escape(compact_reason(p.why_this_match_is_gold, 520))}\n\n"
+        f"🧠 <b>Разбор / Analysis:</b>\n{html_escape(compact_reason(p.reasoning, 900))}"
+        f"{data_block}\n"
+        f"🔗 <a href=\"{html_escape(p.tracking_url)}\">Открыть матч / Check result</a>\n"
         f"{bookmaker_link_line(p.match_title, getattr(p, "bookmaker_url", ""))}\n\n"
-        f"⚠️ <i>Не финансовый совет. Ставь только сумму, которую готов потерять.</i>"
+        f"⚠️ <i>Не финансовый совет / Not financial advice. Ставь только сумму, которую готов потерять / Only risk what you can afford to lose.</i>"
     )
 
 
 def render_result_line(match_title: str, score: str, bet: str, status: str) -> str:
     """Строка результата прогноза."""
     if status == "win":
-        mark = "✅ зашло"
+        mark = "✅ зашло / won"
     elif status == "void":
-        mark = "↩️ возврат"
+        mark = "↩️ возврат / void"
     else:
-        mark = "❌ не зашло"
+        mark = "❌ не зашло / lost"
 
     return (
         f"{mark} — <b>{html_escape(match_title)}</b>\n"
-        f"Счёт: <b>{html_escape(score)}</b>\n"
-        f"Прогноз: <b>{html_escape(normalize_bet_label(bet))}</b>"
+        f"Счёт / Score: <b>{html_escape(score)}</b>\n"
+        f"Прогноз / Pick: <b>{html_escape(normalize_bet_label(bet))}</b>"
     )

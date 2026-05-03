@@ -469,3 +469,25 @@ https://predict.telonyx.app/health
 ### Важно
 
 Для выдачи доступа бот должен быть администратором приватного канала и иметь право создавать invite links.
+
+
+## V21: bilingual predictions, styled buttons, subscription guard
+
+Добавлено:
+- прогнозы теперь RU/EN: основные поля, инструкция по рынку, риск, confidence, expected score, key numbers;
+- inline-кнопки формируются как raw JSON с `style`: `primary`, `success`, `danger` where needed;
+- добавлен переключатель `STYLED_BUTTONS_ENABLED`;
+- подписочный guard:
+  - уведомление за 24 часа;
+  - уведомление за 5 часов;
+  - уведомление за 1 час;
+  - удаление пользователя из приватного канала после окончания доступа;
+  - после продления уведомления сбрасываются.
+
+Новые переменные:
+```env
+SUBSCRIPTION_CHECK_INTERVAL_MINUTES=15
+SUBSCRIPTION_KICK_ENABLED=true
+SUBSCRIPTION_NOTIFY_ENABLED=true
+STYLED_BUTTONS_ENABLED=true
+```
