@@ -50,6 +50,39 @@ class DailyPipeline:
             return self._single_language_result(summary, [])
         debug.append(f"📦 Матчів від джерела: {len(raw_fixtures)}")
         raw_fixtures = self._filter_raw_fixtures(raw_fixtures)
+
+        # v39: если к моменту запуска все сегодняшние матчи уже начались/прошли,
+        # автоматически ищем ближайшие будущие матчи на следующих датах.
+        # Это важно для ручного RUN_ON_START вечером: бот не должен постить прошедшие игры,
+        # но и не должен молча отдавать пустоту, если завтра уже есть линия матчей.
+        search_date = target_date
+        if not raw_fixtures and self.settings.prediction_lookahead_days > 0:
+            max_days = max(0, self.settings.prediction_lookahead_days)
+            for offset in range(1, max_days + 1):
+                candidate_date = target_date + timedelta(days=offset)
+                logger.info(
+                    "Pipeline: на дату %s будущих матчей нет, пробую дату %s",
+                    target_date,
+                    candidate_date,
+                )
+
+                try:
+                    candidate_raw = await self.provider.fixtures_by_date(candidate_date)
+                    candidate_filtered = self._filter_raw_fixtures(candidate_raw)
+                    debug.append(
+                        f"➡️ Перевірка {candidate_date.isoformat()}: "
+                        f"{len(candidate_raw)} від джерела, {len(candidate_filtered)} після фільтра"
+                    )
+
+                    if candidate_filtered:
+                        raw_fixtures = candidate_filtered
+                        search_date = candidate_date
+                        debug.append(f"✅ Взято найближчі майбутні матчі: {candidate_date.isoformat()}")
+                        break
+
+                except Exception as exc:
+                    logger.exception("Pipeline: не удалось получить lookahead fixtures на дату %s", candidate_date)
+                    debug.append(f"⚠️ Помилка lookahead {candidate_date.isoformat()}: {escape(str(exc)[:250])}")
         debug.append(f"🔎 Після первинного фільтра: {len(raw_fixtures)}")
         contexts: list[CandidateContext] = []
         errors, rejected = [], []
@@ -140,7 +173,7 @@ class DailyPipeline:
 
         uk_summary = summaries.get("uk") or next(iter(summaries.values()))
         uk_details = details_by_lang.get("uk") or next(iter(details_by_lang.values()))
-        await self._save_predictions(date_key, picks, uk_details, contexts, provider_name)
+        await self._save_predictions(search_date.isoformat(), picks, uk_details, contexts, provider_name)
         await self._save_daily_run(date_key, uk_summary, len(picks))
         return summaries, details_by_lang
 

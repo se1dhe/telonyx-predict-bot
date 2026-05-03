@@ -85,6 +85,7 @@ class Settings(BaseSettings):
     max_raw_events: int = Field(10, alias="MAX_RAW_EVENTS")
     max_candidates_for_ai: int = Field(5, alias="MAX_CANDIDATES_FOR_AI")
     min_match_start_lead_minutes: int = Field(20, alias="MIN_MATCH_START_LEAD_MINUTES")
+    prediction_lookahead_days: int = Field(2, alias="PREDICTION_LOOKAHEAD_DAYS")
     allowed_countries_raw: str = Field("", alias="ALLOWED_COUNTRIES")
     preferred_league_ids_raw: str = Field("", alias="PREFERRED_LEAGUE_IDS")
     data_provider: str = Field("LOCAL", alias="DATA_PROVIDER")
