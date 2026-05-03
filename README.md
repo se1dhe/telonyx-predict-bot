@@ -764,3 +764,12 @@ PAYKASSA_FALLBACK_ENDPOINTS="https://paykassa.app/sci/0.4/index.php"
 MIN_MATCH_START_LEAD_MINUTES="20"
 RESULT_CHECK_INTERVAL_MINUTES="15"
 ```
+
+
+## v35: fix fixture_sort_key crash
+
+Исправлено:
+
+- Убрана ошибка `name 'fixture_sort_key' is not defined` в LOCAL pipeline.
+- Добавлен совместимый alias `fixture_sort_key -> fixture_sort_timestamp`, чтобы старые вызовы не ломали сбор прогнозов.
+

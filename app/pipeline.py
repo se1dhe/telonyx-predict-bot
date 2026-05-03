@@ -371,6 +371,11 @@ def fixture_start_utc(fixture: object) -> datetime | None:
     return None
 
 
+
+def fixture_sort_key(fixture: object) -> int:
+    """Обратная совместимость со старым именем сортировки."""
+    return fixture_sort_timestamp(fixture)
+
 def fixture_sort_timestamp(fixture: object) -> int:
     start = fixture_start_utc(fixture)
     if start is not None:
