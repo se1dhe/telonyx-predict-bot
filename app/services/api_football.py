@@ -449,10 +449,11 @@ def detect_risks(ctx: CandidateContext) -> list[str]:
 
 
 
-def detect_rejection_risks(ctx: CandidateContext) -> list[str]:
+def detect_rejection_risks(ctx: CandidateContext, *args, **kwargs) -> list[str]:
     """Совместимость со старым LOCAL provider.
 
-    В старом коде free_data_provider импортирует detect_rejection_risks.
-    В v14 функция была переименована в detect_risks, из-за этого контейнер падал на старте.
+    LOCAL provider в старом коде может вызывать detect_rejection_risks(ctx, fixture)
+    или detect_rejection_risks(ctx). Поэтому принимаем дополнительные аргументы
+    и просто игнорируем их.
     """
     return detect_risks(ctx)

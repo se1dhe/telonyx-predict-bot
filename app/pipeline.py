@@ -1,5 +1,6 @@
 from __future__ import annotations
 import logging
+import re
 from datetime import date, datetime
 from html import escape
 from zoneinfo import ZoneInfo
@@ -13,6 +14,7 @@ from app.services.news_search import NewsSearchClient
 from app.services.provider_factory import get_data_provider
 from app.services.rule_based_selector import RuleBasedSelector
 from app.services.render import render_daily_summary, render_pick_detail
+from app.services.draftkings_resolver import DraftKingsResolver
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +26,7 @@ class DailyPipeline:
         self.news = NewsSearchClient()
         self.ai = AiSelector()
         self.rule_based = RuleBasedSelector()
+        self.draftkings = DraftKingsResolver()
 
     async def run_for_today(self, force: bool = False) -> tuple[str, list[str]]:
         today = datetime.now(ZoneInfo(self.settings.tz)).date()
@@ -102,6 +105,7 @@ class DailyPipeline:
             ai_response = await self.rule_based.select_gold_matches(contexts)
 
         picks = self._enrich_picks_with_context(ai_response.selected, contexts)
+        await self._resolve_bookmaker_links(picks)
         self._log_selected_picks(picks)
         debug.append(f"✅ Выбрано матчей: {len(picks)}")
         if not picks:
@@ -128,6 +132,35 @@ class DailyPipeline:
         await self._save_predictions(date_key, picks, details, contexts, provider_name)
         await self._save_daily_run(date_key, summary, len(picks))
         return summary, details
+
+    def _split_pick_teams(self, pick: AiPick) -> tuple[str, str]:
+        """Получить home/away из match_title."""
+        if "—" in pick.match_title:
+            home, away = pick.match_title.split("—", 1)
+            return home.strip(), away.strip()
+        if " vs " in pick.match_title.lower():
+            parts = re.split(r"\s+vs\s+", pick.match_title, flags=re.IGNORECASE)
+            if len(parts) >= 2:
+                return parts[0].strip(), parts[1].strip()
+        return pick.match_title.strip(), ""
+
+    async def _resolve_bookmaker_links(self, picks: list[AiPick]) -> None:
+        """Найти точные DraftKings event URLs для выбранных матчей."""
+        if not self.settings.bookmaker_link_enabled:
+            return
+
+        for pick in picks:
+            home, away = self._split_pick_teams(pick)
+            if not home or not away:
+                continue
+
+            url = await self.draftkings.resolve(home, away)
+            pick.bookmaker_url = url
+
+            if url:
+                logger.info("Bookmaker URL set for %s: %s", pick.match_title, url)
+            else:
+                logger.info("Bookmaker URL not found for %s", pick.match_title)
 
     def _log_selected_picks(self, picks: list[AiPick]) -> None:
         """Писать в Railway Logs reasoning/уверенность по выбранным матчам."""

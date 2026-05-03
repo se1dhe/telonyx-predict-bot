@@ -2,72 +2,81 @@ from __future__ import annotations
 
 from datetime import datetime
 from urllib.parse import quote_plus
+import re
 
 from app.config import get_settings
 from app.schemas import AiPick, CandidateContext
 
 
-def bookmaker_url(match_title: str) -> str:
-    """Ссылка на линию букмекера.
+def draftkings_slug(match_title: str) -> str:
+    """Сделать slug для DraftKings event URL.
 
-    В v13 основной вариант — не сломанный поиск Pinnacle, а стабильная страница футбольной линии.
-    Для тоталов пользователю надо открыть футбол → матч → рынок Total Goals / Over-Under.
+    Пример:
+    Auxerre — Angers -> auxerre-vs-angers
+
+    Важно: DraftKings ещё требует внутренний event id.
+    Без официального odds/deeplink API мы можем стабильно собрать только человеко-читаемый slug.
+    """
+    import unicodedata
+
+    text = str(match_title).replace("—", " vs ").replace("-", " vs ")
+    text = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode("ascii")
+    text = text.lower()
+    text = re.sub(r"[^a-z0-9]+", "-", text)
+    text = re.sub(r"-+", "-", text).strip("-")
+    text = text.replace("-vs-", "-vs-")
+    return text
+
+
+def bookmaker_url(match_title: str) -> str:
+    """Ссылка на DraftKings event.
+
+    Шаблон:
+    https://sportsbook.draftkings.com/event/{slug}
+
+    Пример slug:
+    Auxerre — Angers -> auxerre-vs-angers
+
+    Важное ограничение:
+    точная ссылка DraftKings часто имеет вид /event/{slug}/{event_id}.
+    event_id нельзя надёжно получить без официального источника odds/deeplink.
+    Поэтому бот формирует максимально близкий URL по slug.
+    Если позже добавим API odds/event-id — сюда можно будет подставлять {event_id}.
     """
     settings = get_settings()
     query = quote_plus(str(match_title))
     home = quote_plus(str(match_title).split("—", 1)[0].strip()) if "—" in str(match_title) else query
     away = quote_plus(str(match_title).split("—", 1)[1].strip()) if "—" in str(match_title) else ""
+    slug = draftkings_slug(match_title)
 
     return (
         settings.bookmaker_search_url_template
         .replace("{query}", query)
         .replace("{home}", home)
         .replace("{away}", away)
+        .replace("{slug}", slug)
     )
 
-
 def parse_backup_bookmaker_links() -> list[tuple[str, str]]:
-    """Разобрать резервные ссылки букмекеров из env.
+    """Резервные букмекеры отключены."""
+    return []
 
-    Формат:
-    BetMGM|https://...;Favbet|https://...
+def bookmaker_link_line(match_title: str, resolved_url: str = "") -> str:
+    """HTML-блок ссылки на DraftKings.
+
+    Показываем только точную ссылку с event_id.
+    Slug без event_id не показываем, потому что DraftKings его не открывает как валидный матч.
     """
-    settings = get_settings()
-    if not settings.bookmaker_backup_links_enabled:
-        return []
-
-    result: list[tuple[str, str]] = []
-    raw = settings.bookmaker_backup_links.strip()
-    if not raw:
-        return result
-
-    for item in raw.split(";"):
-        item = item.strip()
-        if not item or "|" not in item:
-            continue
-
-        name, url = item.split("|", 1)
-        name = name.strip()
-        url = url.strip()
-
-        if name and url:
-            result.append((name, url))
-
-    return result
-
-
-def bookmaker_link_line(match_title: str) -> str:
-    """HTML-блок ссылок на букмекеров."""
     settings = get_settings()
     if not settings.bookmaker_link_enabled:
         return ""
 
-    lines = [
-        f"💸 <a href=\"{html_escape(bookmaker_url(match_title))}\">Открыть линию {html_escape(settings.bookmaker_name)}</a>"
-    ]
+    if not resolved_url:
+        return "💸 DraftKings: точная ссылка на матч пока не найдена"
 
-    for name, url in parse_backup_bookmaker_links():
-        lines.append(f"↪️ <a href=\"{html_escape(url)}\">Резерв: {html_escape(name)}</a>")
+    lines = [
+        f"💸 <a href=\"{html_escape(resolved_url)}\">Открыть DraftKings odds</a>"
+    ]
 
     if settings.bookmaker_market_hint:
         lines.append(f"📌 {html_escape(settings.bookmaker_market_hint)}")
@@ -233,7 +242,7 @@ def render_daily_summary(
                 f"{risk_emoji(p.risk_level)} <b>Риск:</b> {html_escape(p.risk_level)}",
                 f"🧠 <b>Уверенность:</b> {p.confidence}/100 ({confidence_text(p.confidence)})",
                 f"🔗 <a href=\"{html_escape(p.tracking_url)}\">Открыть матч</a>",
-                bookmaker_link_line(p.match_title),
+                bookmaker_link_line(p.match_title, getattr(p, "bookmaker_url", "")),
                 "",
             ]
         )
@@ -287,7 +296,7 @@ def render_pick_detail(p: AiPick, ctx: CandidateContext | None = None) -> str:
         f"🧠 <b>Разбор:</b>\n{html_escape(compact_reason(p.reasoning, 900))}"
         f"{data_block}"
         f"🔗 <a href=\"{html_escape(p.tracking_url)}\">Открыть матч / проверить результат</a>\n"
-        f"{bookmaker_link_line(p.match_title)}\n\n"
+        f"{bookmaker_link_line(p.match_title, getattr(p, "bookmaker_url", ""))}\n\n"
         f"⚠️ <i>Не финансовый совет. Ставь только сумму, которую готов потерять.</i>"
     )
 

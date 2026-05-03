@@ -339,3 +339,74 @@ ImportError: cannot import name 'detect_rejection_risks' from 'app.services.api_
 def detect_rejection_risks(ctx):
     return detect_risks(ctx)
 ```
+
+
+## V17: fix LOCAL risks + DraftKings-only links
+
+Исправлено:
+- `detect_rejection_risks() takes 1 positional argument but 2 were given`.
+  Теперь функция принимает `*args, **kwargs`, поэтому LOCAL provider снова собирает контексты.
+- BetMGM и Favbet убраны.
+- Bookmaker link теперь строится под DraftKings event slug:
+  `https://sportsbook.draftkings.com/event/{slug}`
+
+Пример:
+```text
+Auxerre — Angers -> https://sportsbook.draftkings.com/event/auxerre-vs-angers
+```
+
+Важно:
+у DraftKings точная ссылка часто имеет вид:
+```text
+/event/auxerre-vs-angers/34020984
+```
+Где `34020984` — внутренний event id DraftKings. Его нельзя надёжно получить без отдельного odds/deeplink API.
+Поэтому v17 формирует максимально близкий URL по slug. Если позже подключить источник event_id,
+шаблон можно заменить на:
+```env
+BOOKMAKER_SEARCH_URL_TEMPLATE=https://sportsbook.draftkings.com/event/{slug}/{event_id}
+```
+
+
+## V18: точные DraftKings ссылки через SerpAPI
+
+Проблема:
+ссылка вида:
+
+```text
+https://sportsbook.draftkings.com/event/auxerre-vs-angers
+```
+
+невалидна, потому что DraftKings требует внутренний event_id:
+
+```text
+https://sportsbook.draftkings.com/event/auxerre-vs-angers/34020984
+```
+
+Решение:
+бот теперь после выбора матчей делает SerpAPI Google search:
+
+```text
+site:sportsbook.draftkings.com/event/{slug} DraftKings
+```
+
+и берёт только URL, которые соответствуют формату:
+
+```text
+https://sportsbook.draftkings.com/event/.../{digits}
+```
+
+Если точная ссылка не найдена — бот НЕ подставляет фейковый slug URL,
+а пишет:
+
+```text
+DraftKings: точная ссылка на матч пока не найдена
+```
+
+Новые переменные:
+
+```env
+DRAFTKINGS_RESOLVER_ENABLED=true
+DRAFTKINGS_RESOLVER_MAX_RESULTS=5
+BOOKMAKER_SEARCH_URL_TEMPLATE=
+```

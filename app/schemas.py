@@ -99,6 +99,7 @@ class AiPick(BaseModel):
     reasoning: str
     data_warnings: list[str] = Field(default_factory=list)
     tracking_url: str
+    bookmaker_url: str = ""
 
 class AiSelectionResponse(BaseModel):
     """Ответ AI."""
