@@ -155,3 +155,19 @@ async def render_daily_end_stats_report(date_key: str) -> str:
         f"ℹ️ Winrate считается только по рассчитанным ставкам: "
         f"<b>плюсы / (плюсы + минусы)</b>. Возвраты не считаются ни плюсом, ни минусом."
     )
+
+
+
+async def render_after_match_daily_stats_report(date_key: str) -> str:
+    """Короткий дневной winrate после закрытого матча."""
+    daily = await collect_stats(date_key=date_key)
+
+    return (
+        f"📊 <b>Дневной winrate за {html_escape(date_key)}</b>\n\n"
+        f"✅ Плюсов: <b>{daily.wins}</b>\n"
+        f"❌ Минусов: <b>{daily.losses}</b>\n"
+        f"↩️ Возвратов: <b>{daily.voids}</b>\n"
+        f"⏳ Ещё ждём: <b>{daily.pending}</b>\n"
+        f"📈 Winrate дня: <b>{daily.winrate_percent}%</b>\n\n"
+        f"ℹ️ Формула: <b>плюсы / (плюсы + минусы)</b>. Возвраты не учитываются."
+    )

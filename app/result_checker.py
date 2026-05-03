@@ -5,6 +5,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from aiogram import Bot
+from aiogram.enums import ParseMode
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
@@ -17,6 +18,7 @@ from app.services.free_data_provider import FreeDataProvider
 from app.services.render import render_result_line
 from app.services.statistics import (
     evaluate_bet_status,
+    render_after_match_daily_stats_report,
     render_daily_end_stats_report,
     save_stats_snapshot,
 )
@@ -37,6 +39,10 @@ class ResultChecker:
     async def check_open_predictions(self) -> int:
         """Проверить все открытые прогнозы.
 
+        После каждого закрытого матча бот публикует:
+        1. результат ставки;
+        2. дневной winrate на текущий момент.
+
         Возвращает количество прогнозов, которые удалось закрыть сейчас.
         """
         async with SessionLocal() as session:
@@ -49,7 +55,7 @@ class ResultChecker:
         if not predictions:
             return 0
 
-        messages: list[str] = []
+        closed_count = 0
 
         for p in predictions:
             try:
@@ -75,27 +81,27 @@ class ResultChecker:
                     status=status,
                     result_text=line,
                 )
-                messages.append(line)
+
+                closed_count += 1
+                await save_stats_snapshot()
+
+                text = f"📌 <b>Матч завершён</b>\n\n{line}"
+
+                if self.settings.stats_after_each_finished_match_enabled:
+                    daily_stats = await render_after_match_daily_stats_report(p.date_key)
+                    text += f"\n\n{daily_stats}"
+
+                await self.bot.send_message(
+                    self.settings.telegram_target_chat_id,
+                    text,
+                    parse_mode=ParseMode.HTML,
+                    disable_web_page_preview=True,
+                )
 
             except Exception:
                 logger.exception("Не удалось проверить прогноз id=%s", p.id)
 
-        if messages:
-            snap = await save_stats_snapshot()
-            text = (
-                "📌 <b>Проверены результаты прогнозов</b>\n\n"
-                + "\n\n".join(messages)
-                + "\n\n"
-                + f"📊 <b>Общий winrate:</b> {snap.winrate_percent}% "
-                  f"({snap.successful_predictions}/{snap.total_predictions})"
-            )
-            await self.bot.send_message(
-                self.settings.telegram_target_chat_id,
-                text,
-                disable_web_page_preview=True,
-            )
-
-        return len(messages)
+        return closed_count
 
     async def send_daily_stats_report(self, force: bool = False) -> bool:
         """Отправить статистику за день и за всё время.
@@ -115,6 +121,7 @@ class ResultChecker:
         await self.bot.send_message(
             self.settings.telegram_target_chat_id,
             text,
+            parse_mode=ParseMode.HTML,
             disable_web_page_preview=True,
         )
         await self._save_report(date_key, text)

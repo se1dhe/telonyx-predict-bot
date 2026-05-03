@@ -32,6 +32,7 @@ class Settings(BaseSettings):
     daily_stats_hour: int = Field(23, alias="DAILY_STATS_HOUR")
     daily_stats_minute: int = Field(55, alias="DAILY_STATS_MINUTE")
     stats_report_enabled: bool = Field(True, alias="STATS_REPORT_ENABLED")
+    stats_after_each_finished_match_enabled: bool = Field(True, alias="STATS_AFTER_EACH_FINISHED_MATCH_ENABLED")
     matches_per_day: int = Field(5, alias="MATCHES_PER_DAY")
     min_ai_confidence: int = Field(45, alias="MIN_AI_CONFIDENCE")
     run_on_start: bool = Field(False, alias="RUN_ON_START")
