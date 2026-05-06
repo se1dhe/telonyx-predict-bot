@@ -134,6 +134,13 @@ class DailyPipeline:
             ai_response = await self.rule_based.select_gold_matches(contexts)
 
         picks = self._enrich_picks_with_context(ai_response.selected, contexts)
+
+        # v45: порядок публикации в Telegram должен быть хронологическим.
+        # AI всё ещё выбирает лучшие матчи, но выводим их по времени старта:
+        # сначала матч, который начнётся раньше.
+        ctx_by_id_for_sort = {c.fixture_id: c for c in contexts}
+        picks.sort(key=lambda p: pick_start_sort_timestamp(p, ctx_by_id_for_sort))
+
         await self._resolve_bookmaker_links(picks)
         self._log_selected_picks(picks)
         debug.append(f"✅ Вибрано матчів: {len(picks)}")
@@ -315,7 +322,7 @@ class DailyPipeline:
     async def _load_existing_texts(self, date_key: str, provider_name: str) -> tuple[dict[str, str], dict[str, list[str]]] | None:
         async with SessionLocal() as session:
             run = (await session.execute(select(DailyRun).where(DailyRun.date_key == date_key))).scalar_one_or_none()
-            preds = (await session.execute(select(Prediction).where(Prediction.date_key == date_key).where(Prediction.provider == provider_name).order_by(Prediction.ai_rank_score.desc()))).scalars().all()
+            preds = (await session.execute(select(Prediction).where(Prediction.date_key == date_key).where(Prediction.provider == provider_name).order_by(Prediction.start_time.asc(), Prediction.ai_rank_score.desc()))).scalars().all()
         if run and preds:
             return self._single_language_result(run.summary_text, [p.rendered_text for p in preds])
         return None
@@ -349,6 +356,45 @@ class DailyPipeline:
                         rendered_text=rendered, main_bet_code=pick.main_bet_code, main_bet_label=pick.main_bet_label,
                         confidence=pick.confidence, ai_rank_score=pick.ai_rank_score))
             await session.commit()
+
+
+def pick_start_sort_timestamp(pick: AiPick, ctx_by_id: dict[str, CandidateContext]) -> tuple[int, int]:
+    """Ключ сортировки финальных прогнозов для публикации.
+
+    Основной порядок: время начала матча по UTC timestamp.
+    Дополнительный порядок: AI score по убыванию, если время одинаковое/неизвестное.
+    """
+    ctx = ctx_by_id.get(pick.fixture_id)
+    ts = context_start_sort_timestamp(ctx)
+    # Чем выше ai_rank_score, тем раньше внутри одинакового времени.
+    return ts, -int(getattr(pick, "ai_rank_score", 0) or 0)
+
+
+def context_start_sort_timestamp(ctx: CandidateContext | None) -> int:
+    if not ctx:
+        return 9999999999
+
+    raw = str(getattr(ctx, "start_time", "") or "").strip()
+    if not raw:
+        return 9999999999
+
+    # API-FOOTBALL обычно отдаёт ISO datetime, например 2026-05-04T19:00:00+03:00.
+    try:
+        dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return int(dt.astimezone(timezone.utc).timestamp())
+    except Exception:
+        pass
+
+    # LOCAL/резервные источники иногда отдают HH:MM. Это достаточно для сортировки внутри дня.
+    match = re.search(r"(\d{1,2}):(\d{2})", raw)
+    if match:
+        hh = int(match.group(1))
+        mm = int(match.group(2))
+        return hh * 3600 + mm * 60
+
+    return 9999999999
 
 
 def fixture_start_utc(fixture: object) -> datetime | None:

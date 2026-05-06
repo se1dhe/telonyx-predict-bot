@@ -907,3 +907,14 @@ DATABASE_URL=${{Postgres.DATABASE_URL}}
 - Добавлены новые переменные: `NEWS_ENABLED`, `NEWS_FOR_TOP_CANDIDATES`, `CONTEXT_TIMEOUT_SECONDS`.
 - Рекомендуемый `PREFERRED_LEAGUE_IDS` ограничивает API-FOOTBALL качественными лигами, чтобы бот не тратил время на U18/низшие/сомнительные матчи.
 
+
+
+## v45: Telegram output sorted by match start time
+
+Изменено:
+
+- Финальные прогнозы теперь публикуются в Telegram по времени начала матча.
+- Самый ранний матч идёт первым.
+- AI/rule-based всё ещё выбирает лучшие матчи, но порядок вывода больше не зависит от confidence/score.
+- Кэшированные прогнозы из PostgreSQL также возвращаются по `start_time ASC`.
+
