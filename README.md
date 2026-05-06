@@ -893,3 +893,17 @@ DATABASE_URL=${{Postgres.DATABASE_URL}}
 
 Важно: `Postgres` должен быть точным названием PostgreSQL service в Railway.
 
+
+
+## v44: API-FOOTBALL paid mode performance
+
+Исправлено/добавлено:
+
+- Режим по умолчанию переведён на `DATA_PROVIDER=API_FOOTBALL`.
+- Добавлен платный API-FOOTBALL ключ в `.env.example`/`.env`.
+- `APIFOOTBALL_FREE_PLAN=false` — разрешает использовать полноценные endpoints paid-плана.
+- Уменьшен риск timeout: контекст каждого матча имеет отдельный `CONTEXT_TIMEOUT_SECONDS`.
+- SerpAPI/news больше не вызывается для каждого сырого матча. Новости добавляются только для топ-кандидатов после первичного score.
+- Добавлены новые переменные: `NEWS_ENABLED`, `NEWS_FOR_TOP_CANDIDATES`, `CONTEXT_TIMEOUT_SECONDS`.
+- Рекомендуемый `PREFERRED_LEAGUE_IDS` ограничивает API-FOOTBALL качественными лигами, чтобы бот не тратил время на U18/низшие/сомнительные матчи.
+

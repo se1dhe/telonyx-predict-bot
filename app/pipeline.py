@@ -1,4 +1,5 @@
 from __future__ import annotations
+import asyncio
 import logging
 import re
 from datetime import date, datetime, timezone, timedelta
@@ -53,19 +54,47 @@ class DailyPipeline:
         debug.append(f"🔎 Після первинного фільтра: {len(raw_fixtures)}")
         contexts: list[CandidateContext] = []
         errors, rejected = [], []
+
+        # v44: API-FOOTBALL paid может вернуть 1000+ матчей за день.
+        # Контекст собираем только по уже отфильтрованному лимиту и не ждём вечность:
+        # каждый матч имеет индивидуальный timeout, новости SerpAPI добавляются только
+        # после скоринга для топ-кандидатов.
         for fixture in raw_fixtures[:self.settings.max_raw_events]:
             try:
-                ctx = await self.provider.build_context(fixture)
+                ctx = await asyncio.wait_for(
+                    self.provider.build_context(fixture),
+                    timeout=max(3, self.settings.context_timeout_seconds),
+                )
+
                 if ctx.pre_ai_score < self.settings.min_context_pre_ai_score or ctx.data_quality_score < self.settings.min_context_data_quality:
                     rejected.append(f"{ctx.home_team} — {ctx.away_team}: data={ctx.data_quality_score}, pre_ai={ctx.pre_ai_score}, league={ctx.league_name}")
                     continue
-                ctx.news = await self.news.search(ctx.home_team, ctx.away_team, ctx.league_name)
+
                 contexts.append(ctx)
+            except asyncio.TimeoutError:
+                errors.append(f"{safe_fixture_title(fixture)}: context timeout after {self.settings.context_timeout_seconds}s")
+                logger.warning("Контекст матчу пропущен по timeout: %s", safe_fixture_title(fixture))
             except Exception as exc:
                 errors.append(f"{safe_fixture_title(fixture)}: {str(exc)[:250]}")
                 logger.exception("Помилка під час збору контексту матчу")
+
         contexts.sort(key=lambda c: c.pre_ai_score, reverse=True)
         contexts = contexts[:self.settings.max_candidates_for_ai]
+
+        if self.settings.news_enabled and self.settings.serpapi_key and contexts:
+            news_limit = max(0, min(self.settings.news_for_top_candidates, len(contexts)))
+            for ctx in contexts[:news_limit]:
+                try:
+                    ctx.news = await asyncio.wait_for(
+                        self.news.search(ctx.home_team, ctx.away_team, ctx.league_name),
+                        timeout=max(2, self.settings.news_timeout_seconds),
+                    )
+                except asyncio.TimeoutError:
+                    logger.warning("SerpAPI news timeout для %s — %s", ctx.home_team, ctx.away_team)
+                    ctx.news = []
+                except Exception as exc:
+                    logger.warning("SerpAPI news error для %s — %s: %s", ctx.home_team, ctx.away_team, exc)
+                    ctx.news = []
         debug += [f"🧠 Контекстів зібрано: {len(contexts)}", f"🗑 Відсіяно за score: {len(rejected)}", f"❌ Помилок під час збору: {len(errors)}"]
         if errors:
             debug.append("\n<b>Перші помилки:</b>")
