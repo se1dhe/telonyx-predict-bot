@@ -9,7 +9,14 @@ from app.services.render import html_escape
 
 @dataclass
 class StatsData:
-    """Статистика прогнозов."""
+    """
+    Статистика прогнозов.
+
+    Важно:
+    - wins/losses участвуют в winrate;
+    - voids/возвраты не участвуют в winrate;
+    - pending — прогнозы, по которым ещё нет финального результата.
+    """
 
     total_settled: int = 0
     wins: int = 0
@@ -20,15 +27,23 @@ class StatsData:
 
 
 async def collect_stats(date_key: str | None = None) -> StatsData:
-    """Собрать статистику прогнозов.
+    """
+    Собрать статистику прогнозов.
+
+    Если date_key передан — собираем статистику только за этот день.
+    Если date_key не передан — собираем общую статистику за всё время.
 
     Winrate считается только по рассчитанным ставкам:
-    win / (win + loss). Возвраты не портят winrate.
+    win / (win + loss).
+
+    Возвраты не портят winrate.
+    Ожидающие матчи тоже не участвуют в winrate.
     """
     from sqlalchemy import select
 
     async with SessionLocal() as session:
         stmt = select(Prediction)
+
         if date_key:
             stmt = stmt.where(Prediction.date_key == date_key)
 
@@ -53,8 +68,13 @@ async def collect_stats(date_key: str | None = None) -> StatsData:
 
 
 async def save_stats_snapshot() -> StatsSnapshot:
-    """Пересчитать и сохранить общую статистику."""
+    """
+    Пересчитать и сохранить общую статистику.
+
+    Snapshot нужен для хранения текущего состояния общей статистики.
+    """
     stats = await collect_stats()
+
     async with SessionLocal() as session:
         snapshot = StatsSnapshot(
             total_predictions=stats.total_settled + stats.voids + stats.pending,
@@ -62,14 +82,18 @@ async def save_stats_snapshot() -> StatsSnapshot:
             failed_predictions=stats.losses,
             winrate_percent=stats.winrate_percent,
         )
+
         session.add(snapshot)
         await session.commit()
         await session.refresh(snapshot)
+
         return snapshot
 
 
 def render_stats_snapshot(snapshot: StatsSnapshot, lang: str = "uk") -> str:
-    """Короткая строка общей статистики."""
+    """
+    Короткая строка общей статистики.
+    """
     if lang == "en":
         return (
             f"total: {snapshot.total_predictions}, "
@@ -77,6 +101,7 @@ def render_stats_snapshot(snapshot: StatsSnapshot, lang: str = "uk") -> str:
             f"lost: {snapshot.failed_predictions}, "
             f"winrate: {snapshot.winrate_percent}%"
         )
+
     if lang == "ru":
         return (
             f"всего: {snapshot.total_predictions}, "
@@ -84,6 +109,7 @@ def render_stats_snapshot(snapshot: StatsSnapshot, lang: str = "uk") -> str:
             f"не зашло: {snapshot.failed_predictions}, "
             f"winrate: {snapshot.winrate_percent}%"
         )
+
     return (
         f"усього: {snapshot.total_predictions}, "
         f"зайшло: {snapshot.successful_predictions}, "
@@ -92,8 +118,68 @@ def render_stats_snapshot(snapshot: StatsSnapshot, lang: str = "uk") -> str:
     )
 
 
+async def can_publish_after_match_daily_stats(date_key: str) -> bool:
+    """
+    Проверить, можно ли публиковать дневной winrate после завершения матча.
+
+    Главное правило:
+    если за этот день ещё есть pending-матчи, дневной winrate публиковать нельзя.
+
+    Это исправляет инцидент:
+    - было 3 матча за день;
+    - завершился только 1;
+    - бот опубликовал дневной winrate 100%;
+    - ещё 2 матча ожидали результата.
+
+    Теперь при pending > 0 вернётся False.
+    """
+    daily = await collect_stats(date_key=date_key)
+
+    total_for_day = daily.wins + daily.losses + daily.voids + daily.pending
+
+    # Если за день вообще нет прогнозов — публиковать нечего
+    if total_for_day <= 0:
+        return False
+
+    # Если есть незакрытые матчи — дневной winrate ещё рано публиковать
+    if daily.pending > 0:
+        return False
+
+    return True
+
+
+async def can_publish_daily_end_report(date_key: str) -> bool:
+    """
+    Проверить, можно ли публиковать финальный отчёт за день.
+
+    Финальный отчёт можно отправлять только когда:
+    - за день есть хотя бы один прогноз;
+    - все прогнозы за этот день уже закрыты;
+    - pending == 0.
+    """
+    daily = await collect_stats(date_key=date_key)
+
+    total_for_day = daily.wins + daily.losses + daily.voids + daily.pending
+
+    # Если за день нет прогнозов — финальный отчёт не нужен
+    if total_for_day <= 0:
+        return False
+
+    # Если ещё есть ожидающие матчи — финальный отчёт публиковать нельзя
+    if daily.pending > 0:
+        return False
+
+    return True
+
+
 async def render_full_stats_report(date_key: str, lang: str = "uk") -> str:
-    """Полный отчёт: день + всё время."""
+    """
+    Полный отчёт: день + всё время.
+
+    Важно:
+    эта функция только рендерит текст.
+    Решение, можно ли публиковать отчёт, принимает can_publish_daily_end_report().
+    """
     daily = await collect_stats(date_key=date_key)
     total = await collect_stats()
 
@@ -149,7 +235,16 @@ async def render_full_stats_report(date_key: str, lang: str = "uk") -> str:
 
 
 async def render_after_match_daily_stats_report(date_key: str, lang: str = "uk") -> str:
-    """Короткий дневной winrate после завершённого матча."""
+    """
+    Короткий дневной winrate после завершённого матча.
+
+    Важно:
+    эта функция только рендерит текст.
+    Она не решает, можно ли публиковать отчёт.
+
+    Перед вызовом этой функции нужно использовать:
+    can_publish_after_match_daily_stats(date_key)
+    """
     daily = await collect_stats(date_key=date_key)
 
     if lang == "en":
@@ -185,8 +280,27 @@ async def render_after_match_daily_stats_report(date_key: str, lang: str = "uk")
     )
 
 
+async def render_after_match_daily_stats_report_if_complete(
+        date_key: str,
+        lang: str = "uk",
+) -> str | None:
+    """
+    Вернуть дневной winrate только если все прогнозы за день уже закрыты.
+
+    Если pending > 0 — возвращаем None.
+    Это значит, что блок дневной статистики не будет добавлен к сообщению результата матча.
+    """
+    can_publish = await can_publish_after_match_daily_stats(date_key)
+
+    if not can_publish:
+        return None
+
+    return await render_after_match_daily_stats_report(date_key=date_key, lang=lang)
+
+
 def evaluate_bet_status(bet_code: str, home_score: int, away_score: int) -> str:
-    """Оценить исход ставки.
+    """
+    Оценить исход ставки.
 
     Возвращает:
     - win;
@@ -206,28 +320,38 @@ def evaluate_bet_status(bet_code: str, home_score: int, away_score: int) -> str:
 
     if bet_code in {"HOME_DOUBLE_CHANCE", "HOME_OR_DRAW_OVER_1_5"}:
         ok_side = home_score >= away_score
+
         if bet_code == "HOME_OR_DRAW_OVER_1_5":
             return "win" if ok_side and total > 1.5 else "loss"
+
         return "win" if ok_side else "loss"
 
     if bet_code in {"AWAY_DOUBLE_CHANCE", "AWAY_OR_DRAW_OVER_1_5"}:
         ok_side = away_score >= home_score
+
         if bet_code == "AWAY_OR_DRAW_OVER_1_5":
             return "win" if ok_side and total > 1.5 else "loss"
+
         return "win" if ok_side else "loss"
 
     if bet_code == "HOME_DNB":
         if home_score > away_score:
             return "win"
+
         if home_score == away_score:
             return "void"
+
         return "loss"
 
     if bet_code == "AWAY_DNB":
         if away_score > home_score:
             return "win"
+
         if home_score == away_score:
             return "void"
+
         return "loss"
 
+    # Если тип ставки неизвестен — лучше считать возвратом,
+    # чтобы не портить статистику ложным win/loss.
     return "void"
