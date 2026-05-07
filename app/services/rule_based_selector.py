@@ -5,7 +5,10 @@ from app.schemas import AiPick, AiSelectionResponse, CandidateContext
 
 
 class RuleBasedSelector:
-    """Безкоштовний fallback-аналітик без OpenAI."""
+    """Безкоштовний fallback-аналітик без OpenAI.
+
+    Версия без прогнозов точного/ожидаемого счёта.
+    """
 
     def __init__(self) -> None:
         self.settings = get_settings()
@@ -33,7 +36,7 @@ class RuleBasedSelector:
 
 
 def build_pick(ctx: CandidateContext) -> AiPick:
-    """Зібрати прогноз за статистичними правилами."""
+    """Зібрати прогноз за статистичними правилами без exact score."""
     h = ctx.home_metrics
     a = ctx.away_metrics
 
@@ -42,8 +45,6 @@ def build_pick(ctx: CandidateContext) -> AiPick:
     over15_rate = (h.over15 + a.over15) / total_matches
     over25_rate = (h.over25 + a.over25) / total_matches
 
-    # TeamMetrics не хранит points отдельным полем.
-    # Считаем очки из W/D/L: победа = 3, ничья = 1.
     h_points = h.wins * 3 + h.draws
     a_points = a.wins * 3 + a.draws
 
@@ -74,14 +75,14 @@ def build_pick(ctx: CandidateContext) -> AiPick:
         bet_code = "OVER_2_5"
         bet_label = "ТБ 2.5"
         safe_label = "ТБ 1.5"
-        risky_label = "ОЗ Да"
+        risky_label = "ОЗ Так"
         risk = "середній"
 
     if btts_rate >= 0.60 and h_goal_avg >= 1.0 and a_goal_avg >= 1.0:
         bet_code = "BTTS_YES"
-        bet_label = "Обе заб’ють — Да"
+        bet_label = "Обидві заб’ють — так"
         safe_label = "ТБ 1.5"
-        risky_label = "ОЗ Да + ТБ 2.5"
+        risky_label = "ОЗ Так + ТБ 2.5"
         risk = "середній"
 
     if strength_diff >= 0.75:
@@ -89,44 +90,36 @@ def build_pick(ctx: CandidateContext) -> AiPick:
         bet_label = f"{ctx.home_team} не програє"
         safe_label = f"{ctx.home_team} не програє"
         risky_label = f"{ctx.home_team} DNB"
-        predicted_winner = f"{ctx.home_team} ближче до перемоги, но безпечніше через 1X"
-        who_should_score = f"{ctx.home_team} має забити минимум один"
+        predicted_winner = f"{ctx.home_team} ближче до перемоги, але безпечніше через 1X"
+        who_should_score = f"{ctx.home_team} має хороші шанси забити"
         risk = "низький"
     elif strength_diff <= -0.75:
         bet_code = "AWAY_DOUBLE_CHANCE"
         bet_label = f"{ctx.away_team} не програє"
         safe_label = f"{ctx.away_team} не програє"
         risky_label = f"{ctx.away_team} DNB"
-        predicted_winner = f"{ctx.away_team} ближче до перемоги, но безпечніше через X2"
-        who_should_score = f"{ctx.away_team} має забити минимум один"
+        predicted_winner = f"{ctx.away_team} ближче до перемоги, але безпечніше через X2"
+        who_should_score = f"{ctx.away_team} має хороші шанси забити"
         risk = "низький"
 
     if bet_code == "HOME_DOUBLE_CHANCE" and over15_rate >= 0.62:
         bet_code = "HOME_OR_DRAW_OVER_1_5"
         bet_label = f"{ctx.home_team} не програє + ТБ 1.5"
-        risky_label = f"{ctx.home_team} победа + ТБ 1.5"
+        risky_label = f"{ctx.home_team} перемога + ТБ 1.5"
 
     if bet_code == "AWAY_DOUBLE_CHANCE" and over15_rate >= 0.62:
         bet_code = "AWAY_OR_DRAW_OVER_1_5"
         bet_label = f"{ctx.away_team} не програє + ТБ 1.5"
-        risky_label = f"{ctx.away_team} победа + ТБ 1.5"
+        risky_label = f"{ctx.away_team} перемога + ТБ 1.5"
 
     confidence = calculate_confidence(ctx, over15_rate, over25_rate, btts_rate, abs(strength_diff))
     rank_score = min(100, max(1, int((ctx.pre_ai_score * 0.55) + (ctx.data_quality_score * 0.25) + confidence * 0.20)))
 
-    expected_home, expected_away = expected_score(
-        strength_diff,
-        h_goal_avg,
-        a_goal_avg,
-        h_concede_avg,
-        a_concede_avg,
-    )
-
     if predicted_winner == "Результат краще не чіпати":
-        if expected_home > expected_away:
-            predicted_winner = f"{ctx.home_team} трохи ближче, але безпечніше через тотал"
-        elif expected_away > expected_home:
-            predicted_winner = f"{ctx.away_team} трохи ближче, але безпечніше через тотал"
+        if strength_diff > 0.25:
+            predicted_winner = f"{ctx.home_team} трохи ближче, але безпечніше через рекомендований ринок"
+        elif strength_diff < -0.25:
+            predicted_winner = f"{ctx.away_team} трохи ближче, але безпечніше через рекомендований ринок"
         else:
             predicted_winner = "Матч виглядає рівним, безпечніший ринок голів"
 
@@ -161,7 +154,7 @@ def build_pick(ctx: CandidateContext) -> AiPick:
         risky_bet_label=risky_label,
         risk_level=risk,
         confidence=confidence,
-        expected_score=f"{expected_home}:{expected_away}",
+        expected_score="",
         why_this_match_is_gold=(
             f"Матч пройшов локальний фільтр: pre_ai={ctx.pre_ai_score}, "
             f"data_quality={ctx.data_quality_score}, є статистична база за формою та гольовими трендами."
@@ -195,44 +188,3 @@ def calculate_confidence(
         confidence -= 4
 
     return max(1, min(88, confidence))
-
-
-def expected_score(
-    strength_diff: float,
-    h_goal_avg: float,
-    a_goal_avg: float,
-    h_concede_avg: float,
-    a_concede_avg: float,
-) -> tuple[int, int]:
-    """Грубый ожидаемый счёт."""
-    home_x = (h_goal_avg + a_concede_avg) / 2
-    away_x = (a_goal_avg + h_concede_avg) / 2
-
-    if strength_diff >= 0.75:
-        home_x += 0.35
-        away_x -= 0.10
-    elif strength_diff <= -0.75:
-        away_x += 0.35
-        home_x -= 0.10
-
-    home_goals = round_to_score(home_x)
-    away_goals = round_to_score(away_x)
-
-    if home_goals + away_goals < 2:
-        if home_x >= away_x:
-            home_goals += 1
-        else:
-            away_goals += 1
-
-    return home_goals, away_goals
-
-
-def round_to_score(value: float) -> int:
-    """Округлить ожидаемые голи в реалистичный счёт."""
-    if value < 0.65:
-        return 0
-    if value < 1.45:
-        return 1
-    if value < 2.35:
-        return 2
-    return 3

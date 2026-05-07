@@ -19,19 +19,17 @@ from app.services.render import render_result_line
 from app.services.statistics import (
     can_publish_daily_end_report,
     evaluate_bet_status,
+    is_prediction_countable,
     render_after_match_daily_stats_report_if_complete,
     render_full_stats_report as render_daily_end_stats_report,
     save_stats_snapshot,
 )
 
-
 logger = logging.getLogger(__name__)
 
 
 class ResultChecker:
-    """
-    Проверка результатов матчей и публикация статистики.
-    """
+    """Проверка результатов матчей и публикация статистики."""
 
     def __init__(self, bot: Bot) -> None:
         self.bot = bot
@@ -40,28 +38,16 @@ class ResultChecker:
         self.local_provider = FreeDataProvider()
 
     async def _send_to_private_channels(self, texts_by_lang: dict[str, str]) -> None:
-        """
-        Отправить сообщение во все заполненные приватные языковые каналы.
-
-        Защита:
-        если несколько языков указывают на один и тот же chat_id,
-        сообщение в этот канал отправляется только один раз.
-        """
+        """Отправить сообщение во все заполненные приватные языковые каналы."""
         sent = set()
 
         for lang in self.settings.active_private_languages:
             chat_id = self.settings.private_channel_for(lang)
-
             if not chat_id or chat_id in sent:
                 continue
 
             sent.add(chat_id)
-
-            text = (
-                    texts_by_lang.get(lang)
-                    or texts_by_lang.get("uk")
-                    or next(iter(texts_by_lang.values()))
-            )
+            text = texts_by_lang.get(lang) or texts_by_lang.get("uk") or next(iter(texts_by_lang.values()))
 
             try:
                 await self.bot.send_message(
@@ -78,18 +64,12 @@ class ResultChecker:
                 )
 
     async def check_open_predictions(self) -> int:
-        """
-        Проверить все открытые прогнозы.
+        """Проверить все открытые прогнозы.
 
-        После каждого закрытого матча бот публикует:
-        1. результат конкретного матча;
-        2. дневной winrate только если все матчи этого дня уже закрыты.
-
-        Важно:
-        если за этот день ещё есть pending-матчи, дневной winrate не публикуется.
-        Это исправляет инцидент с преждевременной публикацией winrate 100%.
-
-        Возвращает количество прогнозов, которые удалось закрыть сейчас.
+        Исправления:
+        - строка финального счёта больше не публикуется;
+        - прогнозы/ставки на счёт не попадают в winrate;
+        - дневной winrate после матча публикуется только когда все countable-матчи дня закрыты.
         """
         async with SessionLocal() as session:
             predictions = (
@@ -103,42 +83,54 @@ class ResultChecker:
 
         closed_count = 0
 
-        for p in predictions:
+        for prediction in predictions:
             try:
-                score = await self._fetch_score(p)
+                score = await self._fetch_score(prediction)
 
                 if score is None:
                     logger.info(
                         "Результат ещё не найден: prediction_id=%s fixture_id=%s match=%s — %s date=%s provider=%s",
-                        p.id,
-                        p.fixture_id,
-                        p.home_team,
-                        p.away_team,
-                        p.date_key,
-                        p.provider,
+                        prediction.id,
+                        prediction.fixture_id,
+                        prediction.home_team,
+                        prediction.away_team,
+                        prediction.date_key,
+                        prediction.provider,
                     )
                     continue
 
                 home_score, away_score = score
-                status = evaluate_bet_status(
-                    p.main_bet_code,
-                    home_score,
-                    away_score,
-                )
-                pick = AiPick.model_validate_json(p.prediction_json)
+                countable = is_prediction_countable(prediction)
 
-                # В БД сохраняем украинский результат,
-                # а в каналы отправляем языковые версии.
+                if countable:
+                    status = evaluate_bet_status(
+                        prediction.main_bet_code,
+                        home_score,
+                        away_score,
+                    )
+                else:
+                    # Старые/случайные прогнозы счёта закрываем как void,
+                    # не публикуем и не учитываем в статистике.
+                    status = "void"
+
+                try:
+                    pick = AiPick.model_validate_json(prediction.prediction_json)
+                    match_title = pick.match_title
+                    bet_label = pick.main_bet_label
+                except Exception:
+                    match_title = f"{prediction.home_team} — {prediction.away_team}"
+                    bet_label = prediction.main_bet_label or prediction.main_bet_code
+
                 stored_line = render_result_line(
-                    pick.match_title,
-                    f"{home_score}:{away_score}",
-                    pick.main_bet_label,
+                    match_title,
+                    f"{home_score}:{away_score}",  # счёт нужен только для совместимости сигнатуры, render его не выводит
+                    bet_label,
                     status,
                     lang="uk",
                 )
 
                 await self._mark_prediction(
-                    prediction_id=p.id,
+                    prediction_id=prediction.id,
                     home_score=home_score,
                     away_score=away_score,
                     status=status,
@@ -148,16 +140,27 @@ class ResultChecker:
                 closed_count += 1
 
                 logger.info(
-                    "Прогноз закрыт: prediction_id=%s match=%s — %s score=%s:%s status=%s",
-                    p.id,
-                    p.home_team,
-                    p.away_team,
+                    "Прогноз закрыт: prediction_id=%s match=%s — %s score=%s:%s status=%s countable=%s",
+                    prediction.id,
+                    prediction.home_team,
+                    prediction.away_team,
                     home_score,
                     away_score,
                     status,
+                    countable,
                 )
 
                 await save_stats_snapshot()
+
+                # Прогнозы/ставки на счёт не публикуем как обычный результат.
+                if not countable:
+                    logger.info(
+                        "Результат не опубликован, потому что прогноз исключён из статистики: prediction_id=%s code=%s label=%s",
+                        prediction.id,
+                        prediction.main_bet_code,
+                        prediction.main_bet_label,
+                    )
+                    continue
 
                 texts: dict[str, str] = {}
 
@@ -169,9 +172,9 @@ class ResultChecker:
                     }.get(lang, "📌 <b>Match finished</b>")
 
                     line = render_result_line(
-                        pick.match_title,
+                        match_title,
                         f"{home_score}:{away_score}",
-                        pick.main_bet_label,
+                        bet_label,
                         status,
                         lang=lang,
                     )
@@ -180,7 +183,7 @@ class ResultChecker:
 
                     if self.settings.stats_after_each_finished_match_enabled:
                         daily_stats = await render_after_match_daily_stats_report_if_complete(
-                            p.date_key,
+                            prediction.date_key,
                             lang=lang,
                         )
 
@@ -188,8 +191,8 @@ class ResultChecker:
                             text += f"\n\n{daily_stats}"
                         else:
                             logger.info(
-                                "Дневной winrate после матча не опубликован: date=%s, есть ожидающие матчи",
-                                p.date_key,
+                                "Дневной winrate после матча не опубликован: date=%s, есть ожидающие countable-матчи",
+                                prediction.date_key,
                             )
 
                     texts[lang] = text
@@ -197,20 +200,12 @@ class ResultChecker:
                 await self._send_to_private_channels(texts)
 
             except Exception:
-                logger.exception("Не удалось проверить прогноз id=%s", p.id)
+                logger.exception("Не удалось проверить прогноз id=%s", prediction.id)
 
         return closed_count
 
     async def send_daily_stats_report(self, force: bool = False) -> bool:
-        """
-        Отправить финальную статистику за день и за всё время.
-
-        По умолчанию отчёт отправляется один раз в день.
-
-        Важно:
-        финальный отчёт нельзя отправлять, если за этот день ещё есть pending-матчи.
-        Иначе можно получить преждевременный daily_end report.
-        """
+        """Отправить финальную статистику за день и за всё время."""
         date_key = datetime.now(ZoneInfo(self.settings.tz)).date().isoformat()
 
         # Перед финальным отчётом ещё раз пробуем закрыть результаты.
@@ -222,7 +217,7 @@ class ResultChecker:
 
         if not force and not await can_publish_daily_end_report(date_key):
             logger.info(
-                "Финальная статистика за %s не отправлена: есть ожидающие матчи или нет прогнозов",
+                "Финальная статистика за %s не отправлена: есть ожидающие countable-матчи или нет прогнозов",
                 date_key,
             )
             return False
@@ -233,25 +228,11 @@ class ResultChecker:
         }
 
         await self._send_to_private_channels(texts)
-
-        await self._save_report(
-            date_key,
-            texts.get("uk") or next(iter(texts.values())),
-            )
-
+        await self._save_report(date_key, texts.get("uk") or next(iter(texts.values())))
         return True
 
     async def _fetch_score(self, prediction: Prediction) -> tuple[int, int] | None:
-        """
-        Получить финальный счёт по прогнозу.
-
-        Для API_FOOTBALL:
-        - берём fixture по id;
-        - принимаем только финальные статусы FT, AET, PEN.
-
-        Для локального провайдера:
-        - ищем результат через FreeDataProvider.
-        """
+        """Получить финальный счёт по прогнозу."""
         if prediction.provider == "API_FOOTBALL":
             fixture = await self.api_provider.fixture_by_id(prediction.fixture_id)
 
@@ -259,21 +240,16 @@ class ResultChecker:
                 return None
 
             status = fixture.get("fixture", {}).get("status", {}).get("short")
-
             if status not in {"FT", "AET", "PEN"}:
                 return None
 
             goals = fixture.get("goals", {})
-
             if goals.get("home") is None or goals.get("away") is None:
                 return None
 
             return int(goals["home"]), int(goals["away"])
 
-        target_date = parse_prediction_date(
-            prediction.date_key,
-            self.settings.tz,
-        )
+        target_date = parse_prediction_date(prediction.date_key, self.settings.tz)
 
         return await self.local_provider.result_for_prediction(
             prediction.fixture_id,
@@ -284,21 +260,14 @@ class ResultChecker:
         )
 
     async def _mark_prediction(
-            self,
-            prediction_id: int,
-            home_score: int,
-            away_score: int,
-            status: str,
-            result_text: str,
+        self,
+        prediction_id: int,
+        home_score: int,
+        away_score: int,
+        status: str,
+        result_text: str,
     ) -> None:
-        """
-        Закрыть прогноз в базе.
-
-        status:
-        - win  -> is_success = True;
-        - loss -> is_success = False;
-        - void -> is_success = None.
-        """
+        """Закрыть прогноз в базе."""
         async with SessionLocal() as session:
             prediction = (
                 await session.execute(
@@ -313,7 +282,6 @@ class ResultChecker:
             elif status == "loss":
                 prediction.is_success = False
             else:
-                # void/возврат
                 prediction.is_success = None
 
             prediction.final_home_score = home_score
@@ -324,27 +292,21 @@ class ResultChecker:
             await session.commit()
 
     async def _report_exists(self, date_key: str) -> bool:
-        """
-        Проверить, был ли уже сохранён финальный daily_end отчёт за дату.
-        """
+        """Проверить, был ли уже сохранён финальный daily_end отчёт за дату."""
         async with SessionLocal() as session:
             existing = (
                 await session.execute(
                     select(StatsReport).where(
                         StatsReport.date_key == date_key,
                         StatsReport.report_type == "daily_end",
-                        )
+                    )
                 )
             ).scalar_one_or_none()
 
             return existing is not None
 
     async def _save_report(self, date_key: str, text: str) -> None:
-        """
-        Сохранить факт отправки финального daily_end отчёта.
-
-        IntegrityError игнорируем, потому что отчёт мог быть сохранён параллельным запуском.
-        """
+        """Сохранить факт отправки финального daily_end отчёта."""
         async with SessionLocal() as session:
             session.add(
                 StatsReport(
@@ -361,12 +323,7 @@ class ResultChecker:
 
 
 def parse_prediction_date(date_key: str, tz: str):
-    """
-    Преобразовать date_key в date.
-
-    Если date_key повреждён или имеет неправильный формат,
-    возвращаем текущую дату в таймзоне проекта.
-    """
+    """Преобразовать date_key в date."""
     try:
         return datetime.strptime(date_key, "%Y-%m-%d").date()
     except ValueError:

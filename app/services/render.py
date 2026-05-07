@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from zoneinfo import ZoneInfo
-from urllib.parse import quote_plus
 import re
+from datetime import datetime, timezone
+from urllib.parse import quote_plus
+from zoneinfo import ZoneInfo
 
 from app.config import get_settings
 from app.i18n import normalize_lang
@@ -11,6 +11,7 @@ from app.schemas import AiPick, CandidateContext
 
 
 def html_escape(value: object) -> str:
+    """Минимальное HTML-экранирование для Telegram parse_mode=HTML."""
     text = "" if value is None else str(value)
     return (
         text.replace("&", "&amp;")
@@ -28,7 +29,6 @@ LABELS = {
         "count": "📌 <b>Матчів у відборі:</b>",
         "bet": "✅ <b>Ставка:</b>",
         "confidence": "🧠 <b>Упевненість:</b>",
-        "score": "🎯 <b>Очікуваний рахунок:</b>",
         "risk": "<b>Ризик:</b>",
         "open_match": "Відкрити матч / перевірити результат",
         "bookmaker": "Відкрити лінію",
@@ -48,6 +48,11 @@ LABELS = {
         "time_missing": "час не вказано джерелом",
         "league_missing": "турнір не вказано джерелом",
         "goals": "голи",
+        "finished": "📌 Матч завершено",
+        "won": "✅ зайшло",
+        "lost": "❌ не зайшло",
+        "void": "↩️ повернення",
+        "prediction": "Прогноз",
     },
     "en": {
         "daily_title": "🏆 <b>Football predictions for today</b>",
@@ -56,7 +61,6 @@ LABELS = {
         "count": "📌 <b>Selected matches:</b>",
         "bet": "✅ <b>Pick:</b>",
         "confidence": "🧠 <b>Confidence:</b>",
-        "score": "🎯 <b>Expected score:</b>",
         "risk": "<b>Risk:</b>",
         "open_match": "Open match / check result",
         "bookmaker": "Open odds at",
@@ -76,6 +80,11 @@ LABELS = {
         "time_missing": "time was not provided by the source",
         "league_missing": "competition was not provided by the source",
         "goals": "goals",
+        "finished": "📌 Match finished",
+        "won": "✅ won",
+        "lost": "❌ lost",
+        "void": "↩️ void",
+        "prediction": "Pick",
     },
     "ru": {
         "daily_title": "🏆 <b>Футбольные прогнозы на сегодня</b>",
@@ -84,7 +93,6 @@ LABELS = {
         "count": "📌 <b>Матчей в отборе:</b>",
         "bet": "✅ <b>Ставка:</b>",
         "confidence": "🧠 <b>Уверенность:</b>",
-        "score": "🎯 <b>Ожидаемый счёт:</b>",
         "risk": "<b>Риск:</b>",
         "open_match": "Открыть матч / проверить результат",
         "bookmaker": "Открыть линию",
@@ -104,6 +112,11 @@ LABELS = {
         "time_missing": "время не указано источником",
         "league_missing": "турнир не указан источником",
         "goals": "голы",
+        "finished": "📌 Матч завершён",
+        "won": "✅ зашло",
+        "lost": "❌ не зашло",
+        "void": "↩️ возврат",
+        "prediction": "Прогноз",
     },
 }
 
@@ -138,47 +151,17 @@ def compact_reason(text: str, limit: int = 700) -> str:
     return value[: limit - 1].rstrip() + "…"
 
 
-def is_mixed_or_wrong_language(text: str, lang: str) -> bool:
-    """Проверить, что AI/fallback вернул текст не на языке канала."""
-    value = str(text or "").lower()
-    if not value:
-        return True
-
-    ru_markers = [
-        "матч прошёл", "матч прошел", "прошел", "прошёл", "локальный фильтр",
-        "есть статистическая база", "статистическая база", "голов", "голами",
-        "голевым", "голевыми", "форма ", "общий фон", "безопаснее",
-        "вероятнее", "ставка лучше", "выглядит", "через общий рынок",
-        "по голу", "к победе", "должен забить", "минимум один",
-        "агрессив", "последние цифры", "размер ставки",
-    ]
-    uk_markers = [
-        "матч пройшов", "локальний фільтр", "є статистична база",
-        "голів", "гольовим", "загальний фон", "безпечніше", "ймовірніше",
-        "ставка краще", "виглядає",
-    ]
-
-    if lang == "uk":
-        return any(m in value for m in ru_markers)
-    if lang == "ru":
-        return any(m in value for m in uk_markers)
-    if lang == "en":
-        cyr = sum(1 for ch in value if "а" <= ch <= "я" or ch == "ё" or ch == "і" or ch == "ї" or ch == "є")
-        return cyr > 5
-    return False
+def localize_free_text(text: str, lang: str) -> str:
+    """Оставить произвольный текст как есть, но безопасно для HTML."""
+    return str(text or "").strip()
 
 
 def format_match_time(ctx: CandidateContext | None, lang: str = "uk") -> str:
-    """Вернуть время матча в таймзоне проекта.
-
-    Важно: часть бесплатных источников отдаёт время в UTC или без tzinfo.
-    Для стабильности naive-время считаем UTC и переводим в TZ из env
-    (по умолчанию Europe/Kiev). Поэтому в постах будет именно киевское время.
-    """
+    """Вернуть время матча в таймзоне проекта."""
     if not ctx:
         return L(lang, "time_missing")
 
-    value = getattr(ctx, "start_time", "") or getattr(ctx.event, "start_time", "") or ""
+    value = getattr(ctx, "start_time", "") or getattr(ctx, "event", None) and getattr(ctx.event, "start_time", "") or ""
     if not value:
         return L(lang, "time_missing")
 
@@ -211,12 +194,14 @@ def simple_bet_name(value: str, lang: str) -> str:
     lang = normalize_lang(lang)
     raw = str(value or "")
     low = raw.lower()
+
     if "1.5" in raw:
         return BET_NAMES["OVER_1_5"][lang]
     if "2.5" in raw:
         return BET_NAMES["OVER_2_5"][lang]
     if "btts" in low or "об" in low or "оз" in low or "both" in low:
         return BET_NAMES["BTTS_YES"][lang]
+
     return html_escape(localize_free_text(raw, lang))
 
 
@@ -268,25 +253,35 @@ def risk_key(risk: str) -> str:
 
 
 def risk_emoji(risk: str) -> str:
-    key = risk_key(risk)
-    return {"low": "🟢", "medium": "🟡", "high": "🔴"}[key]
+    return {"low": "🟢", "medium": "🟡", "high": "🔴"}[risk_key(risk)]
 
 
 def confidence_text(confidence: int, lang: str) -> str:
     lang = normalize_lang(lang)
     if lang == "en":
-        if confidence >= 75: return "high"
-        if confidence >= 60: return "medium"
-        if confidence >= 45: return "moderate"
+        if confidence >= 75:
+            return "high"
+        if confidence >= 60:
+            return "medium"
+        if confidence >= 45:
+            return "moderate"
         return "low"
+
     if lang == "ru":
-        if confidence >= 75: return "высокая"
-        if confidence >= 60: return "средняя"
-        if confidence >= 45: return "умеренная"
+        if confidence >= 75:
+            return "высокая"
+        if confidence >= 60:
+            return "средняя"
+        if confidence >= 45:
+            return "умеренная"
         return "низкая"
-    if confidence >= 75: return "висока"
-    if confidence >= 60: return "середня"
-    if confidence >= 45: return "помірна"
+
+    if confidence >= 75:
+        return "висока"
+    if confidence >= 60:
+        return "середня"
+    if confidence >= 45:
+        return "помірна"
     return "низька"
 
 
@@ -294,93 +289,41 @@ def bookmaker_link_line(match_title: str, bookmaker_url: str = "", lang: str = "
     settings = get_settings()
     if not settings.bookmaker_link_enabled:
         return ""
+
     name = settings.bookmaker_name or "bookmaker"
     url = str(bookmaker_url or "").strip()
+
     if not url and settings.bookmaker_search_url_template:
         url = settings.bookmaker_search_url_template.format(query=quote_plus(match_title))
+
     if not url:
         return ""
+
     return f'💵 <a href="{html_escape(url)}">{L(lang, "bookmaker")} {html_escape(name)}</a>'
 
 
 def generated_why(p: AiPick, ctx: CandidateContext | None, lang: str) -> str:
+    if p.why_this_match_is_gold:
+        return compact_reason(p.why_this_match_is_gold, 520)
+
     lang = normalize_lang(lang)
-    if lang == "uk" and p.why_this_match_is_gold and not is_mixed_or_wrong_language(p.why_this_match_is_gold, lang):
-        return compact_reason(p.why_this_match_is_gold, 520)
-    if lang == "ru" and p.why_this_match_is_gold and not is_mixed_or_wrong_language(p.why_this_match_is_gold, lang):
-        return compact_reason(p.why_this_match_is_gold, 520)
-    if lang == "en" and p.why_this_match_is_gold and not is_mixed_or_wrong_language(p.why_this_match_is_gold, lang):
-        return compact_reason(p.why_this_match_is_gold, 520)
-
-    if not ctx:
-        return {
-            "uk": "Матч пройшов фільтр, тому що рекомендований ринок виглядає статистично чистіше, ніж ставка на переможця.",
-            "en": "The match passed the filter because the selected market has a cleaner statistical profile than the match outcome.",
-            "ru": "Матч прошёл фильтр, потому что выбранный рынок выглядит статистически чище, чем ставка на исход.",
-        }[lang]
-
-    h, a = ctx.home_metrics, ctx.away_metrics
-
-    if lang == "en":
-        return (
-            f"The match passed the filter because the selected market is supported by recent form data: "
-            f"{ctx.home_team} have {h.wins} wins in {h.matches} recent matches, "
-            f"{ctx.away_team} have {a.wins} wins in {a.matches}. "
-            f"Over 1.5 profile: {h.over15}/{max(1, h.matches)} and {a.over15}/{max(1, a.matches)}."
-        )
-    if lang == "ru":
-        return (
-            f"Матч прошёл фильтр по статистике последних игр: "
-            f"{ctx.home_team} имеет {h.wins} побед в {h.matches} матчах, "
-            f"{ctx.away_team} — {a.wins} побед в {a.matches}. "
-            f"Профиль ТБ 1.5: {h.over15}/{max(1, h.matches)} и {a.over15}/{max(1, a.matches)}."
-        )
-    return (
-        f"Матч пройшов фільтр за статистикою останніх ігор: "
-        f"{ctx.home_team} має {h.wins} перемог у {h.matches} матчах, "
-        f"{ctx.away_team} — {a.wins} перемог у {a.matches} матчах. "
-        f"Профіль ТБ 1.5: {h.over15}/{max(1, h.matches)} і {a.over15}/{max(1, a.matches)}."
-    )
+    return {
+        "uk": "Матч пройшов фільтр, тому що рекомендований ринок виглядає статистично чистіше, ніж ставка на переможця.",
+        "en": "The match passed the filter because the selected market has a cleaner statistical profile than the match outcome.",
+        "ru": "Матч прошёл фильтр, потому что выбранный рынок выглядит статистически чище, чем ставка на исход.",
+    }[lang]
 
 
 def generated_analysis(p: AiPick, ctx: CandidateContext | None, lang: str) -> str:
+    if p.reasoning:
+        return compact_reason(p.reasoning, 900)
+
     lang = normalize_lang(lang)
-    if lang == "uk" and p.reasoning and not is_mixed_or_wrong_language(p.reasoning, lang):
-        return compact_reason(p.reasoning, 900)
-    if lang == "ru" and p.reasoning and not is_mixed_or_wrong_language(p.reasoning, lang):
-        return compact_reason(p.reasoning, 900)
-    if lang == "en" and p.reasoning and not is_mixed_or_wrong_language(p.reasoning, lang):
-        return compact_reason(p.reasoning, 900)
-
-    if not ctx:
-        return {
-            "uk": "Найобережніший підхід — грати рекомендований ринок і не посилювати прогноз до ризикового результату.",
-            "en": "The safest approach is to focus on the recommended market and avoid forcing a stronger outcome bet.",
-            "ru": "Самый осторожный подход — играть рекомендованный рынок и не усиливать прогноз до рискованного исхода.",
-        }[lang]
-
-    h, a = ctx.home_metrics, ctx.away_metrics
-
-    if lang == "en":
-        return (
-            f"The model avoids a blind outcome bet and focuses on {bet_name(p, lang)}. "
-            f"Recent numbers show goals for/against {h.goals_for}:{h.goals_against} for {ctx.home_team} "
-            f"and {a.goals_for}:{a.goals_against} for {ctx.away_team}. "
-            f"Confidence is {p.confidence}/100, so stake sizing should remain disciplined."
-        )
-    if lang == "ru":
-        return (
-            f"Модель не лезет в агрессивный исход и выбирает рынок {bet_name(p, lang)}. "
-            f"Последние цифры по голам: {h.goals_for}:{h.goals_against} у {ctx.home_team} "
-            f"и {a.goals_for}:{a.goals_against} у {ctx.away_team}. "
-            f"Уверенность {p.confidence}/100, поэтому размер ставки должен быть аккуратным."
-        )
-    return (
-        f"Модель не йде в агресивний результат і обирає ринок {bet_name(p, lang)}. "
-        f"Останні цифри за голами: {h.goals_for}:{h.goals_against} у {ctx.home_team} "
-        f"та {a.goals_for}:{a.goals_against} у {ctx.away_team}. "
-        f"Упевненість {p.confidence}/100, тому розмір ставки має бути обережним."
-    )
+    return {
+        "uk": "Найобережніший підхід — грати рекомендований ринок і не посилювати прогноз до ризикового результату.",
+        "en": "The safest approach is to focus on the recommended market and avoid forcing a stronger outcome bet.",
+        "ru": "Самый осторожный подход — играть рекомендованный рынок и не усиливать прогноз до рискованного исхода.",
+    }[lang]
 
 
 def render_daily_summary(
@@ -390,24 +333,35 @@ def render_daily_summary(
     contexts_by_id: dict[str, CandidateContext] | None = None,
     lang: str = "uk",
 ) -> str:
+    """Сводный пост на день без ожидаемого счёта."""
     lang = normalize_lang(lang)
     if not picks:
         return L(lang, "no_matches")
 
-    lines = [L(lang, "daily_title"), "", L(lang, "daily_intro"), L(lang, "what_to_find"), "", f"{L(lang, 'count')} {len(picks)}", ""]
+    lines = [
+        L(lang, "daily_title"),
+        "",
+        L(lang, "daily_intro"),
+        L(lang, "what_to_find"),
+        "",
+        f"{L(lang, 'count')} {len(picks)}",
+        "",
+    ]
 
     for idx, p in enumerate(picks, start=1):
         lines.extend([
             f"{idx}. <b>{html_escape(p.match_title)}</b>",
             f"{L(lang, 'bet')} {html_escape(bet_name(p, lang))}",
             f"{L(lang, 'confidence')} {p.confidence}/100 ({confidence_text(p.confidence, lang)})",
-            f"{L(lang, 'score')} {html_escape(p.expected_score)}",
             f"{risk_emoji(p.risk_level)} {L(lang, 'risk')} {RISK[lang][risk_key(p.risk_level)]}",
         ])
+
         if p.tracking_url:
             lines.append(f'🔗 <a href="{html_escape(p.tracking_url)}">{L(lang, "open_match")}</a>')
+
         if p.bookmaker_url:
             lines.append(bookmaker_link_line(p.match_title, p.bookmaker_url, lang))
+
         lines.append("")
 
     lines.append(L(lang, "how"))
@@ -415,6 +369,7 @@ def render_daily_summary(
 
 
 def render_pick_detail(p: AiPick, ctx: CandidateContext | None = None, lang: str = "uk") -> str:
+    """Детальный пост по одному прогнозу без ожидаемого счёта."""
     lang = normalize_lang(lang)
     match_time = format_match_time(ctx, lang)
     league = f"{ctx.country} • {ctx.league_name}" if ctx else L(lang, "league_missing")
@@ -433,162 +388,84 @@ def render_pick_detail(p: AiPick, ctx: CandidateContext | None = None, lang: str
             f"• {html_escape(ctx.away_team)}: {a.wins}-{a.draws}-{a.losses}, {goals_label} {a.goals_for}:{a.goals_against}, {total15_label} {a.over15}/{max(1, a.matches)}, {btts_label} {a.btts}/{max(1, a.matches)}"
         )
 
-    return (
-        f"⚽️ <b>{html_escape(p.match_title)}</b>\n"
-        f"{L(lang, 'date_time')} {html_escape(match_time)}\n"
-        f"{L(lang, 'league')} {html_escape(league)}\n\n"
-        f"{L(lang, 'main_bet')} {html_escape(main)}\n"
-        f"📌 {bet_instruction(p, lang)}\n\n"
-        f"{L(lang, 'safe')} {simple_bet_name(p.safe_bet_label, lang)}\n"
-        f"{L(lang, 'risky')} {simple_bet_name(p.risky_bet_label, lang)}\n"
-        f"{risk_emoji(p.risk_level)} {L(lang, 'risk')} {RISK[lang][risk_key(p.risk_level)]}\n"
-        f"{L(lang, 'confidence')} {p.confidence}/100 ({confidence_text(p.confidence, lang)})\n"
-        f"{L(lang, 'score')} {html_escape(p.expected_score)}\n\n"
-        f"{L(lang, 'winner')} {html_escape(localize_free_text(p.predicted_winner, lang))}\n"
-        f"{L(lang, 'score_team')} {html_escape(localize_free_text(p.who_should_score, lang))}\n\n"
-        f"{L(lang, 'why')}\n{html_escape(generated_why(p, ctx, lang))}\n\n"
-        f"{L(lang, 'analysis')}\n{html_escape(generated_analysis(p, ctx, lang))}"
-        f"{data_block}\n"
-        f"🔗 <a href=\"{html_escape(p.tracking_url)}\">{L(lang, 'open_match')}</a>\n"
-        f"{bookmaker_link_line(p.match_title, getattr(p, 'bookmaker_url', ''), lang)}\n\n"
-        f"{L(lang, 'disclaimer')}"
-    )
+    lines = [
+        f"⚽️ <b>{html_escape(p.match_title)}</b>",
+        f"{L(lang, 'date_time')} {html_escape(match_time)}",
+        f"{L(lang, 'league')} {html_escape(league)}",
+        "",
+        f"{L(lang, 'main_bet')} {html_escape(main)}",
+        bet_instruction(p, lang),
+        f"{L(lang, 'confidence')} {p.confidence}/100 ({confidence_text(p.confidence, lang)})",
+        f"{risk_emoji(p.risk_level)} {L(lang, 'risk')} {RISK[lang][risk_key(p.risk_level)]}",
+        "",
+        f"{L(lang, 'safe')} {html_escape(simple_bet_name(p.safe_bet_label, lang))}",
+        f"{L(lang, 'risky')} {html_escape(simple_bet_name(p.risky_bet_label, lang))}",
+        "",
+        f"{L(lang, 'winner')} {html_escape(localize_free_text(p.predicted_winner, lang))}",
+        f"{L(lang, 'score_team')} {html_escape(localize_free_text(p.who_should_score, lang))}",
+        "",
+        f"{L(lang, 'why')}\n{html_escape(generated_why(p, ctx, lang))}",
+        "",
+        f"{L(lang, 'analysis')}\n{html_escape(generated_analysis(p, ctx, lang))}{data_block}",
+    ]
+
+    if p.tracking_url:
+        lines.append("")
+        lines.append(f'🔗 <a href="{html_escape(p.tracking_url)}">{L(lang, "open_match")}</a>')
+
+    if p.bookmaker_url:
+        line = bookmaker_link_line(p.match_title, p.bookmaker_url, lang)
+        if line:
+            lines.append(line)
+
+    lines.append("")
+    lines.append(L(lang, "disclaimer"))
+    return "\n".join(lines)
 
 
-def localize_free_text(text: str, lang: str) -> str:
-    """Нормализовать свободные поля AI/fallback под язык канала.
+def render_result_message(
+    prediction: object,
+    status: str,
+    lang: str = "uk",
+) -> str:
+    """Пост результата без строки финального счёта.
 
-    Эти поля часто приходят как полу-свободный текст, поэтому здесь
-    убираем русско-украинскую смесь, которую видно в постах.
+    Счёт больше не показываем пользователю. Он может использоваться только
+    внутри result checker для расчёта рынков ТБ/ОЗ/двойной шанс/DNB.
     """
     lang = normalize_lang(lang)
-    value = str(text or "").strip()
-    low = value.lower()
+    status_key = {"win": "won", "loss": "lost", "void": "void"}.get(status, "void")
 
-    if lang == "uk":
-        # Сначала — готовые частые фразы.
-        phrase_rules = [
-            ("исход лучше не трогать", "результат краще не чіпати"),
-            ("исход опасный", "результат ризиковий"),
-            ("исход рискованный", "результат ризиковий"),
-            ("опасный исход", "ризиковий результат"),
-            ("матч выглядит равным", "матч виглядає рівним"),
-            ("ближе к победе", "ближче до перемоги"),
-            ("чуть ближе к победе", "трохи ближче до перемоги"),
-            ("чуть ближе", "трохи ближче"),
-            ("безопаснее через общий рынок", "безпечніше через загальний ринок"),
-            ("безопаснее через тотал", "безпечніше через тотал"),
-            ("безопаснее через x2", "безпечніше через X2"),
-            ("безопаснее через 1x", "безпечніше через 1X"),
-            ("лучше через общий рынок", "краще через загальний ринок"),
-            ("ставка лучше через общий рынок", "ставка краще через загальний ринок"),
-            ("выглядит вероятнее по голу", "виглядає ймовірніше за голом"),
-            ("вероятнее по голу", "ймовірніше за голом"),
-            ("должен забить минимум один", "має забити мінімум один"),
-            ("должна забить минимум один", "має забити мінімум один"),
-            ("должны забить минимум один", "мають забити мінімум один"),
-            ("должен забить", "має забити"),
-            ("должна забить", "має забити"),
-            ("должны забить", "мають забити"),
-            ("минимум один", "мінімум один"),
-            ("по голу", "за голом"),
-            ("к победе", "до перемоги"),
-        ]
+    match_title = f"{getattr(prediction, 'home_team', '')} — {getattr(prediction, 'away_team', '')}".strip(" —")
+    bet_label = getattr(prediction, "main_bet_label", "") or getattr(prediction, "main_bet_code", "")
 
-        word_rules = [
-            ("но", "але"),
-            ("хозяева", "господарі"),
-            ("гости", "гості"),
-            ("победа", "перемога"),
-            ("победе", "перемоги"),
-            ("проиграет", "програє"),
-            ("проиграют", "програють"),
-            ("вероятнее", "ймовірніше"),
-            ("безопаснее", "безпечніше"),
-            ("выглядит", "виглядає"),
-            ("общий", "загальний"),
-            ("рынок", "ринок"),
-            ("рынка", "ринку"),
-            ("голов", "голів"),
-            ("голами", "голами"),
-            ("голы", "голи"),
-            ("голевым", "гольовим"),
-            ("голевыми", "гольовими"),
-            ("последние", "останні"),
-            ("цифры", "цифри"),
-            ("размер", "розмір"),
-            ("уверенность", "упевненість"),
-            ("должен", "має"),
-            ("должна", "має"),
-            ("должны", "мають"),
-            ("агрессивный", "агресивний"),
-            ("агрессивний", "агресивний"),
-            ("минимум", "мінімум"),
-            ("один", "один"),
-        ]
-
-        result = value
-
-        for src, dst in phrase_rules:
-            result = re.sub(re.escape(src), dst, result, flags=re.IGNORECASE)
-
-        # Замены отдельных слов по границам слова, чтобы не ломать названия команд.
-        for src, dst in word_rules:
-            result = re.sub(rf"(?<![A-Za-zА-Яа-яІіЇїЄєҐґ]){re.escape(src)}(?![A-Za-zА-Яа-яІіЇїЄєҐґ])", dst, result, flags=re.IGNORECASE)
-
-        # Частые хвосты после regex-замен.
-        result = result.replace(" к ", " до ")
-        result = result.replace(" по ", " за ")
-        result = re.sub(r"\s+", " ", result).strip()
-        return result
-
-    if lang == "en":
-        if "опас" in low or "ризик" in low:
-            return "outcome is risky"
-        if "тотал" in low:
-            return "safer through total goals"
-        if "хозя" in low or "госп" in low:
-            return "home side is closer"
-        if "гост" in low:
-            return "away side is closer"
-        if "гол" in low:
-            return "goal market looks safer"
-        if "побед" in low or "перемог" in low:
-            return "closer to winning"
-        return "market is safer than match winner"
-
-    if lang == "ru":
-        rules = [
-            ("результат ризиковий", "исход рискованный"),
-            ("безпечніше через тотал", "безопаснее через тотал"),
-            ("ймовірніше", "вероятнее"),
-            ("господарі", "хозяева"),
-            ("гості", "гости"),
-            ("перемога", "победа"),
-            ("не програє", "не проиграет"),
-            ("не програють", "не проиграют"),
-            ("тотал більше", "тотал больше"),
-            ("обидві команди заб’ють", "обе команды забьют"),
-        ]
-        result = value
-        for src, dst in rules:
-            result = re.sub(src, dst, result, flags=re.IGNORECASE)
-        return result
-
-    return value
-
-
-def render_result_line(match_title: str, score: str, bet: str, status: str, lang: str = "uk") -> str:
-    lang = normalize_lang(lang)
-    marks = {
-        "uk": {"win": "✅ зайшло", "void": "↩️ повернення", "loss": "❌ не зайшло", "score": "Рахунок", "pick": "Прогноз"},
-        "en": {"win": "✅ won", "void": "↩️ void", "loss": "❌ lost", "score": "Score", "pick": "Pick"},
-        "ru": {"win": "✅ зашло", "void": "↩️ возврат", "loss": "❌ не зашло", "score": "Счёт", "pick": "Прогноз"},
-    }
-    m = marks[lang]
-    mark = m["win"] if status == "win" else m["void"] if status == "void" else m["loss"]
     return (
-        f"{mark} — <b>{html_escape(match_title)}</b>\n"
-        f"{m['score']}: <b>{html_escape(score)}</b>\n"
-        f"{m['pick']}: <b>{html_escape(simple_bet_name(bet, lang))}</b>"
+        f"{L(lang, 'finished')}\n\n"
+        f"{L(lang, status_key)} — {html_escape(match_title)}\n"
+        f"{L(lang, 'prediction')}: {html_escape(simple_bet_name(str(bet_label), lang))}"
     )
+
+
+def render_result_line(*args: object, lang: str = "uk") -> str:
+    """Совместимый рендер результата без строки счёта.
+
+    Поддерживает два старых варианта вызова:
+    1) render_result_line(prediction, status, lang="uk")
+    2) render_result_line(match_title, score, bet_label, status, lang="uk")
+
+    Аргумент score намеренно игнорируется, чтобы больше не публиковать счёт.
+    """
+    if len(args) >= 4:
+        match_title = str(args[0] or "")
+        bet_label = str(args[2] or "")
+        status = str(args[3] or "void")
+        status_key = {"win": "won", "loss": "lost", "void": "void"}.get(status, "void")
+        return (
+            f"{L(lang, status_key)} — {html_escape(match_title)}\n"
+            f"{L(lang, 'prediction')}: {html_escape(simple_bet_name(bet_label, lang))}"
+        )
+
+    if len(args) >= 2:
+        return render_result_message(prediction=args[0], status=str(args[1] or "void"), lang=lang)
+
+    return ""

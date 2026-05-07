@@ -65,14 +65,13 @@ class AiSelector:
 
             for index, pick in enumerate(parsed.selected, start=1):
                 logger.info(
-                    "AI PICK #%s | provider=%s | match=%s | bet=%s | confidence=%s/100 | risk=%s | expected_score=%s",
+                    "AI PICK #%s | provider=%s | match=%s | bet=%s | confidence=%s/100 | risk=%s",
                     index,
                     self.provider,
                     pick.match_title,
                     pick.main_bet_label,
                     pick.confidence,
                     pick.risk_level,
-                    pick.expected_score,
                 )
                 logger.info("AI PICK #%s | why=%s", index, pick.why_this_match_is_gold)
                 logger.info("AI PICK #%s | reasoning=%s", index, pick.reasoning)
@@ -84,7 +83,7 @@ class AiSelector:
         return parsed
 
     def _build_prompt(self, payload: list[dict]) -> str:
-        """Единый промпт для OpenAI и Gemini."""
+        """Единый промпт для OpenAI и Gemini без прогнозов точного счёта."""
         return f"""
 Ти футбольний аналітик для Telegram-бота TelOnyx Predict.
 
@@ -92,6 +91,8 @@ class AiSelector:
 - Усі текстові поля в JSON відповіді пиши українською мовою.
 - Не змішуй українську з російською.
 - Не вигадуй травми, коефіцієнти, склади або новини, якщо їх немає в даних.
+- Не прогнозуй точний або очікуваний рахунок.
+- Не пропонуй ставки на точний рахунок / correct score / exact score.
 - Якщо даних недостатньо або матч сумнівний — краще відхилити.
 - Відповідай тільки валідним JSON без markdown, без пояснень поза JSON.
 
@@ -104,9 +105,15 @@ class AiSelector:
 6. У LOCAL режимі враховуй, що injuries/current odds можуть бути неповними.
 7. Відсій сумнівні матчі.
 8. Залиши максимум {self.settings.matches_per_day} найкращих матчів.
-9. Обери найлогічніший ринок:
+9. Обери тільки один із дозволених ринків:
 OVER_1_5, OVER_2_5, BTTS_YES, HOME_DOUBLE_CHANCE, AWAY_DOUBLE_CHANCE,
 HOME_OR_DRAW_OVER_1_5, AWAY_OR_DRAW_OVER_1_5, HOME_DNB, AWAY_DNB, NO_BET.
+
+Заборонено:
+- CORRECT_SCORE;
+- EXACT_SCORE;
+- SCORE;
+- будь-який main_bet_label про точний рахунок.
 
 Вимоги:
 - Не обирай нижче confidence {self.settings.min_ai_confidence}.
@@ -114,13 +121,15 @@ HOME_OR_DRAW_OVER_1_5, AWAY_OR_DRAW_OVER_1_5, HOME_DNB, AWAY_DNB, NO_BET.
 - Якщо матч сумнівний — відхиляй.
 - Для risk_level використовуй тільки: низький, середній, високий.
 - tracking_url і bookmaker_url бери з даних кандидата, якщо вони є.
-- event_id бери з даних кандидата.
+- fixture_id бери з даних кандидата.
+- Поле expected_score не заповнюй, залишай порожнім рядком.
 
 Формат відповіді:
 {{
  "selected": [{{
+  "fixture_id": "id",
   "match_title": "Team A — Team B",
-  "event_id": "id",
+  "ai_rank_score": 80,
   "main_bet_code": "OVER_1_5",
   "main_bet_label": "Тотал більше 1.5",
   "predicted_winner": "господарі ближче до перемоги / результат ризиковий",
@@ -129,7 +138,7 @@ HOME_OR_DRAW_OVER_1_5, AWAY_OR_DRAW_OVER_1_5, HOME_DNB, AWAY_DNB, NO_BET.
   "risky_bet_label": "Обидві заб’ють — так",
   "risk_level": "низький / середній / високий",
   "confidence": 70,
-  "expected_score": "2:1",
+  "expected_score": "",
   "why_this_match_is_gold": "Чому матч пройшов фільтр",
   "reasoning": "Короткий, але вдумливий розбір",
   "data_warnings": ["немає підтверджених травм"],
@@ -155,7 +164,6 @@ HOME_OR_DRAW_OVER_1_5, AWAY_OR_DRAW_OVER_1_5, HOME_DNB, AWAY_DNB, NO_BET.
             "input": prompt,
         }
 
-        # Некоторые reasoning-модели OpenAI не поддерживают temperature.
         model_name = self.settings.openai_model.lower()
         if not model_name.startswith(("gpt-5", "o1", "o3", "o4")):
             request_kwargs["temperature"] = 0.18
@@ -211,13 +219,9 @@ HOME_OR_DRAW_OVER_1_5, AWAY_OR_DRAW_OVER_1_5, HOME_DNB, AWAY_DNB, NO_BET.
         if not candidates:
             raise RuntimeError(f"Gemini returned no candidates: {data}")
 
-        parts = (
-            candidates[0]
-            .get("content", {})
-            .get("parts", [])
-        )
-
+        parts = candidates[0].get("content", {}).get("parts", [])
         text_chunks = []
+
         for part in parts:
             if isinstance(part, dict) and part.get("text"):
                 text_chunks.append(str(part["text"]))
