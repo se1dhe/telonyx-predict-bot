@@ -49,7 +49,24 @@ class AiSelector:
         if self.settings.log_ai_reasoning:
             logger.info("LOG_AI_REASONING=true; AI provider=%s raw preview: %s", self.provider, raw[:2500])
 
-        parsed = AiSelectionResponse.model_validate(extract_json(raw))
+        try:
+            parsed = self._parse_response(raw)
+        except Exception as exc:
+            if self.provider != "gemini":
+                raise
+
+            logger.warning(
+                "Gemini returned malformed JSON, trying one repair request. error=%s raw_preview=%s",
+                exc,
+                raw[:1500],
+            )
+            repaired_raw = await self._call_gemini(self._build_json_repair_prompt(raw, str(exc)))
+
+            if self.settings.log_ai_reasoning:
+                logger.info("Gemini repaired JSON preview: %s", repaired_raw[:2500])
+
+            parsed = self._parse_response(repaired_raw)
+
         parsed.selected = [
             p for p in parsed.selected
             if p.main_bet_code != "NO_BET" and p.confidence >= self.settings.min_ai_confidence
@@ -83,6 +100,10 @@ class AiSelector:
 
         return parsed
 
+    def _parse_response(self, raw: str) -> AiSelectionResponse:
+        """Распарсить и провалидировать JSON-ответ AI."""
+        return AiSelectionResponse.model_validate(extract_json(raw))
+
     def _build_prompt(self, payload: list[dict]) -> str:
         """Единый промпт для OpenAI и Gemini без прогнозов точного счёта."""
         return f"""
@@ -96,6 +117,8 @@ class AiSelector:
 - Не пропонуй ставки на точний рахунок / correct score / exact score.
 - Якщо даних недостатньо або матч сумнівний — краще відхилити.
 - Відповідай тільки валідним JSON без markdown, без пояснень поза JSON.
+- JSON має бути повністю завершеним: закрий усі лапки, масиви й об’єкти.
+- Не додавай текст поза JSON.
 
 Методологія:
 1. Форма команд за останні матчі.
@@ -151,6 +174,27 @@ HOME_OR_DRAW_OVER_1_5, AWAY_OR_DRAW_OVER_1_5, HOME_DNB, AWAY_DNB, NO_BET.
 
 Кандидати:
 {json.dumps(payload, ensure_ascii=False)}
+"""
+
+    def _build_json_repair_prompt(self, raw: str, error: str) -> str:
+        """Промпт для починки невалидного JSON от Gemini."""
+        return f"""
+Ти отримав невалідний JSON після футбольного аналізу.
+
+Завдання:
+- Виправ тільки JSON-синтаксис.
+- Не додавай markdown.
+- Не додавай пояснення.
+- Не вигадуй нові матчі або нові дані.
+- Якщо частина JSON була обрізана, закрий поточний об’єкт/масив коректно.
+- Поверни тільки JSON у схемі:
+{{"selected": [], "rejected_summary": []}}
+
+Помилка парсингу:
+{error[:500]}
+
+Невалідний JSON:
+{raw[:6000]}
 """
 
     async def _call_openai(self, prompt: str) -> str:
@@ -264,7 +308,7 @@ HOME_OR_DRAW_OVER_1_5, AWAY_OR_DRAW_OVER_1_5, HOME_DNB, AWAY_DNB, NO_BET.
                 }
             ],
             "generationConfig": {
-                "temperature": 0.15,
+                "temperature": 0.1,
                 "topP": 0.8,
                 "maxOutputTokens": 8192,
                 "responseMimeType": "application/json",
@@ -296,7 +340,12 @@ HOME_OR_DRAW_OVER_1_5, AWAY_OR_DRAW_OVER_1_5, HOME_DNB, AWAY_DNB, NO_BET.
         if not candidates:
             raise RuntimeError(f"Gemini returned no candidates: {data}")
 
-        parts = candidates[0].get("content", {}).get("parts", [])
+        candidate = candidates[0]
+        finish_reason = str(candidate.get("finishReason") or "").upper()
+        if finish_reason == "MAX_TOKENS":
+            raise RuntimeError("Gemini response was truncated by MAX_TOKENS")
+
+        parts = candidate.get("content", {}).get("parts", [])
         text_chunks = []
 
         for part in parts:
