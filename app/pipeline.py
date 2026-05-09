@@ -36,6 +36,7 @@ class DailyPipeline:
     async def run_for_date(self, target_date: date, force: bool = False) -> tuple[dict[str, str], dict[str, list[str]]]:
         date_key = target_date.isoformat()
         provider_name = self.settings.provider_normalized
+        ai_provider_name = (self.settings.ai_provider or "ai").strip().lower()
         if not force:
             cached = await self._load_existing_texts(date_key, provider_name)
             if cached:
@@ -108,16 +109,16 @@ class DailyPipeline:
             return self._no_quality_matches_result()
         if self.settings.ai_enabled:
             try:
-                logger.info("Pipeline: отправляю %s кандидатов в OpenAI", len(contexts))
+                logger.info("Pipeline: отправляю %s кандидатов в AI provider=%s", len(contexts), ai_provider_name)
                 ai_response = await self.ai.select_gold_matches(contexts)
-                logger.info("Pipeline: OpenAI вернул выбранных матчей: %s", len(ai_response.selected))
+                logger.info("Pipeline: AI provider=%s вернул выбранных матчей: %s", ai_provider_name, len(ai_response.selected))
             except Exception as exc:
                 safe_error = escape(str(exc)[:1000])
 
                 if self.settings.ai_fallback_on_error:
-                    logger.exception("OpenAI не смог выбрать матчи, включаю rule-based fallback")
-                    debug.append("🧠 OpenAI: ошибка, используется локальный fallback")
-                    debug.append(f"⚠️ OpenAI error: <code>{safe_error}</code>")
+                    logger.exception("AI provider=%s не смог выбрать матчи, включаю rule-based fallback", ai_provider_name)
+                    debug.append(f"🧠 AI provider={escape(ai_provider_name)}: ошибка, используется локальный fallback")
+                    debug.append(f"⚠️ AI error: <code>{safe_error}</code>")
                     ai_response = await self.rule_based.select_gold_matches(contexts)
                 else:
                     summary = (
@@ -129,8 +130,8 @@ class DailyPipeline:
                     await self._save_daily_run(date_key, summary, 0)
                     return self._single_language_result(summary, [])
         else:
-            logger.info("Pipeline: OpenAI отключён, использую локальный rule-based selector")
-            debug.append("🧠 OpenAI: отключён, используется локальный алгоритм")
+            logger.info("Pipeline: AI отключён, использую локальный rule-based selector")
+            debug.append("🧠 AI: отключён, используется локальный алгоритм")
             ai_response = await self.rule_based.select_gold_matches(contexts)
 
         picks = self._enrich_picks_with_context(ai_response.selected, contexts)
