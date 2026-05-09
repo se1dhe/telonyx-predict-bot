@@ -52,11 +52,18 @@ class Settings(BaseSettings):
     subscription_kick_enabled: bool = Field(True, alias="SUBSCRIPTION_KICK_ENABLED")
     subscription_notify_enabled: bool = Field(True, alias="SUBSCRIPTION_NOTIFY_ENABLED")
     styled_buttons_enabled: bool = Field(True, alias="STYLED_BUTTONS_ENABLED")
-    openai_api_key: str = Field(..., alias="OPENAI_API_KEY")
+
+    # AI provider settings.
+    # OPENAI_API_KEY больше не обязательный, потому что бот может работать только через Gemini.
+    openai_api_key: str = Field("", alias="OPENAI_API_KEY")
     openai_model: str = Field("gpt-5.5", alias="OPENAI_MODEL")
     ai_provider: str = Field("openai", alias="AI_PROVIDER")
     gemini_api_key: str = Field("", alias="GEMINI_API_KEY")
-    gemini_model: str = Field("gemini-1.5-pro", alias="GEMINI_MODEL")
+    gemini_model: str = Field("gemini-2.5-flash", alias="GEMINI_MODEL")
+    gemini_fallback_model: str = Field("gemini-2.5-flash-lite", alias="GEMINI_FALLBACK_MODEL")
+    ai_retry_max_attempts: int = Field(3, alias="AI_RETRY_MAX_ATTEMPTS")
+    ai_retry_base_delay_seconds: float = Field(8.0, alias="AI_RETRY_BASE_DELAY_SECONDS")
+    ai_timeout_seconds: int = Field(90, alias="AI_TIMEOUT_SECONDS")
     ai_enabled: bool = Field(True, alias="AI_ENABLED")
     ai_fallback_on_error: bool = Field(True, alias="AI_FALLBACK_ON_ERROR")
     log_ai_reasoning: bool = Field(True, alias="LOG_AI_REASONING")
