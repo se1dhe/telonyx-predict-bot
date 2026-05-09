@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 
@@ -172,11 +173,84 @@ HOME_OR_DRAW_OVER_1_5, AWAY_OR_DRAW_OVER_1_5, HOME_DNB, AWAY_DNB, NO_BET.
         return response.output_text.strip()
 
     async def _call_gemini(self, prompt: str) -> str:
-        """Вызов Google Gemini REST API без дополнительной зависимости."""
+        """Вызов Google Gemini REST API с retry и fallback-моделью."""
         if not self.settings.gemini_api_key:
             raise RuntimeError("GEMINI_API_KEY is empty")
 
-        model = (self.settings.gemini_model or "gemini-1.5-pro").strip()
+        primary_model = (self.settings.gemini_model or "gemini-2.5-flash").strip()
+        fallback_model = (self.settings.gemini_fallback_model or "").strip()
+
+        models = [primary_model]
+        if fallback_model and fallback_model != primary_model:
+            models.append(fallback_model)
+
+        last_error: Exception | None = None
+
+        for model_index, model in enumerate(models):
+            attempts = max(1, int(self.settings.ai_retry_max_attempts or 1))
+
+            for attempt in range(1, attempts + 1):
+                try:
+                    logger.info(
+                        "Gemini request: model=%s attempt=%s/%s fallback=%s",
+                        model,
+                        attempt,
+                        attempts,
+                        model_index > 0,
+                    )
+                    return await self._call_gemini_once(prompt, model)
+
+                except GeminiRateLimitError as exc:
+                    last_error = exc
+                    retry_after = exc.retry_after_seconds
+                    fallback_available = model_index + 1 < len(models)
+                    should_retry_same_model = attempt < attempts
+
+                    if not should_retry_same_model and fallback_available:
+                        logger.warning(
+                            "Gemini model=%s exhausted by rate limit, switching to fallback model=%s",
+                            model,
+                            models[model_index + 1],
+                        )
+                        break
+
+                    if not should_retry_same_model:
+                        logger.warning("Gemini model=%s exhausted by rate limit and no fallback is available", model)
+                        break
+
+                    delay = retry_after or float(self.settings.ai_retry_base_delay_seconds or 8.0) * attempt
+                    delay = max(1.0, min(delay, 45.0))
+                    logger.warning(
+                        "Gemini HTTP 429 for model=%s attempt=%s/%s; retry in %.1fs",
+                        model,
+                        attempt,
+                        attempts,
+                        delay,
+                    )
+                    await asyncio.sleep(delay)
+
+                except Exception as exc:
+                    last_error = exc
+                    if attempt >= attempts:
+                        logger.warning("Gemini model=%s failed after %s attempts: %s", model, attempts, exc)
+                        break
+
+                    delay = float(self.settings.ai_retry_base_delay_seconds or 8.0) * attempt
+                    delay = max(1.0, min(delay, 30.0))
+                    logger.warning(
+                        "Gemini error for model=%s attempt=%s/%s: %s; retry in %.1fs",
+                        model,
+                        attempt,
+                        attempts,
+                        exc,
+                        delay,
+                    )
+                    await asyncio.sleep(delay)
+
+        raise RuntimeError(f"Gemini failed for all configured models: {last_error}")
+
+    async def _call_gemini_once(self, prompt: str, model: str) -> str:
+        """Один HTTP-запрос к Gemini без повторов."""
         endpoint = (
             f"https://generativelanguage.googleapis.com/v1beta/models/"
             f"{model}:generateContent?key={self.settings.gemini_api_key}"
@@ -197,7 +271,7 @@ HOME_OR_DRAW_OVER_1_5, AWAY_OR_DRAW_OVER_1_5, HOME_DNB, AWAY_DNB, NO_BET.
             },
         }
 
-        timeout = aiohttp.ClientTimeout(total=90)
+        timeout = aiohttp.ClientTimeout(total=max(20, int(self.settings.ai_timeout_seconds or 90)))
 
         async with aiohttp.ClientSession(timeout=timeout) as session:
             async with session.post(
@@ -206,6 +280,9 @@ HOME_OR_DRAW_OVER_1_5, AWAY_OR_DRAW_OVER_1_5, HOME_DNB, AWAY_DNB, NO_BET.
                 headers={"Content-Type": "application/json"},
             ) as response:
                 raw = await response.text()
+
+                if response.status == 429:
+                    raise GeminiRateLimitError(raw[:1500], retry_after_seconds=parse_retry_delay(raw))
 
                 if response.status >= 400:
                     raise RuntimeError(f"Gemini HTTP {response.status}: {raw[:1500]}")
@@ -245,3 +322,25 @@ def extract_json(text: str) -> dict:
         text = text[start:end + 1]
 
     return json.loads(text)
+
+
+class GeminiRateLimitError(RuntimeError):
+    """Gemini вернул HTTP 429 / RESOURCE_EXHAUSTED."""
+
+    def __init__(self, message: str, retry_after_seconds: float | None = None) -> None:
+        super().__init__(f"Gemini HTTP 429: {message}")
+        self.retry_after_seconds = retry_after_seconds
+
+
+def parse_retry_delay(raw: str) -> float | None:
+    """Достать retry delay из текста Gemini, например: 'Please retry in 23.361s'."""
+    import re
+
+    match = re.search(r"retry in\s+([0-9]+(?:\.[0-9]+)?)s", raw, flags=re.IGNORECASE)
+    if not match:
+        return None
+
+    try:
+        return float(match.group(1))
+    except ValueError:
+        return None
