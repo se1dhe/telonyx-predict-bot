@@ -54,7 +54,6 @@ class Settings(BaseSettings):
     styled_buttons_enabled: bool = Field(True, alias="STYLED_BUTTONS_ENABLED")
 
     # AI provider settings.
-    # OPENAI_API_KEY больше не обязательный, потому что бот может работать только через Gemini.
     openai_api_key: str = Field("", alias="OPENAI_API_KEY")
     openai_model: str = Field("gpt-5.5", alias="OPENAI_MODEL")
     ai_provider: str = Field("openai", alias="AI_PROVIDER")
@@ -87,13 +86,35 @@ class Settings(BaseSettings):
     stats_after_each_finished_match_enabled: bool = Field(True, alias="STATS_AFTER_EACH_FINISHED_MATCH_ENABLED")
     result_check_interval_minutes: int = Field(15, alias="RESULT_CHECK_INTERVAL_MINUTES")
     matches_per_day: int = Field(5, alias="MATCHES_PER_DAY")
-    min_ai_confidence: int = Field(45, alias="MIN_AI_CONFIDENCE")
+    min_ai_confidence: int = Field(62, alias="MIN_AI_CONFIDENCE")
     run_on_start: bool = Field(False, alias="RUN_ON_START")
     max_raw_events: int = Field(80, alias="MAX_RAW_EVENTS")
-    max_candidates_for_ai: int = Field(18, alias="MAX_CANDIDATES_FOR_AI")
-    min_match_start_lead_minutes: int = Field(20, alias="MIN_MATCH_START_LEAD_MINUTES")
-    min_context_data_quality: int = Field(5, alias="MIN_CONTEXT_DATA_QUALITY")
-    min_context_pre_ai_score: int = Field(5, alias="MIN_CONTEXT_PRE_AI_SCORE")
+    max_candidates_for_ai: int = Field(12, alias="MAX_CANDIDATES_FOR_AI")
+    min_match_start_lead_minutes: int = Field(90, alias="MIN_MATCH_START_LEAD_MINUTES")
+    min_context_data_quality: int = Field(45, alias="MIN_CONTEXT_DATA_QUALITY")
+    min_context_pre_ai_score: int = Field(55, alias="MIN_CONTEXT_PRE_AI_SCORE")
+
+    # Safe-mode и самообучение: жестко режем слабые рынки и учитываем историю закрытых прогнозов.
+    safe_mode_enabled: bool = Field(True, alias="SAFE_MODE_ENABLED")
+    safe_mode_allowed_bets_raw: str = Field(
+        "OVER_1_5,HOME_DOUBLE_CHANCE,AWAY_DOUBLE_CHANCE,HOME_DNB,AWAY_DNB",
+        alias="SAFE_MODE_ALLOWED_BETS",
+    )
+    safe_mode_disallowed_bet_penalty: int = Field(18, alias="SAFE_MODE_DISALLOWED_BET_PENALTY")
+    safe_mode_allow_high_risk: bool = Field(False, alias="SAFE_MODE_ALLOW_HIGH_RISK")
+    learning_enabled: bool = Field(True, alias="LEARNING_ENABLED")
+    learning_recent_limit: int = Field(300, alias="LEARNING_RECENT_LIMIT")
+    learning_min_sample_size: int = Field(8, alias="LEARNING_MIN_SAMPLE_SIZE")
+    learning_min_bet_winrate: int = Field(68, alias="LEARNING_MIN_BET_WINRATE")
+    learning_min_league_winrate: int = Field(58, alias="LEARNING_MIN_LEAGUE_WINRATE")
+    learning_min_country_winrate: int = Field(56, alias="LEARNING_MIN_COUNTRY_WINRATE")
+    learning_min_combo_winrate: int = Field(62, alias="LEARNING_MIN_COMBO_WINRATE")
+    learning_penalty_strength: float = Field(0.65, alias="LEARNING_PENALTY_STRENGTH")
+    learning_bonus_strength: float = Field(0.20, alias="LEARNING_BONUS_STRENGTH")
+    learning_max_penalty: int = Field(22, alias="LEARNING_MAX_PENALTY")
+    learning_max_bonus: int = Field(6, alias="LEARNING_MAX_BONUS")
+    learning_min_team_form_matches: int = Field(6, alias="LEARNING_MIN_TEAM_FORM_MATCHES")
+
     allowed_countries_raw: str = Field("", alias="ALLOWED_COUNTRIES")
     preferred_league_ids_raw: str = Field("", alias="PREFERRED_LEAGUE_IDS")
     data_provider: str = Field("LOCAL", alias="DATA_PROVIDER")
@@ -171,7 +192,6 @@ class Settings(BaseSettings):
                 langs.append(lang)
         return langs or [self.normalize_language(self.default_language)]
 
-
     @property
     def allowed_countries(self) -> List[str]:
         if not self.allowed_countries_raw.strip():
@@ -190,6 +210,10 @@ class Settings(BaseSettings):
             return []
         return [x.strip().upper() for x in self.local_league_codes_raw.split(",") if x.strip()]
 
+    @property
+    def safe_mode_allowed_bets(self) -> List[str]:
+        """Разрешённые рынки для безопасного режима."""
+        return [x.strip().upper() for x in self.safe_mode_allowed_bets_raw.split(",") if x.strip()]
 
     @property
     def thesportsdb_league_ids(self) -> List[str]:
@@ -197,7 +221,6 @@ class Settings(BaseSettings):
         if not self.thesportsdb_league_ids_raw.strip():
             return []
         return [x.strip() for x in self.thesportsdb_league_ids_raw.split(",") if x.strip()]
-
 
     @property
     def espn_leagues(self) -> List[str]:
