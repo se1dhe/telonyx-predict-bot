@@ -32,6 +32,7 @@ class FixtureFilterStats:
     fallback: int = 0
     skipped_status: int = 0
     skipped_time: int = 0
+    skipped_no_time: int = 0
     skipped_country: int = 0
     skipped_noise: int = 0
 
@@ -75,7 +76,7 @@ class DailyPipeline:
             "🧮 Фільтр: "
             f"preferred={filter_stats.preferred}, fallback={filter_stats.fallback}, "
             f"status={filter_stats.skipped_status}, time={filter_stats.skipped_time}, "
-            f"country={filter_stats.skipped_country}, noise={filter_stats.skipped_noise}"
+            f"no_time={filter_stats.skipped_no_time}, country={filter_stats.skipped_country}, noise={filter_stats.skipped_noise}"
         )
         contexts: list[CandidateContext] = []
         errors, rejected = [], []
@@ -223,12 +224,7 @@ class DailyPipeline:
         return pick.match_title.strip(), ""
 
     async def _resolve_bookmaker_links(self, picks: list[AiPick]) -> None:
-        """Утром не ищем букмекера, если включён late-refresh.
-
-        Точные страницы часто появляются ближе к старту матча, поэтому основной
-        поиск делает отдельный scheduler job за 10 минут до начала. Так мы не
-        тратим SerpAPI утром и не публикуем мусорные ссылки.
-        """
+        """Утром не ищем букмекера, если включён late-refresh."""
         if not self.settings.bookmaker_link_enabled:
             return
 
@@ -299,10 +295,13 @@ class DailyPipeline:
                 league_name = str(getattr(fixture, "league_name", ""))
                 start_utc = fixture_start_utc(fixture)
 
-            if status_short and status_short not in {"NS", "TBD"}:
+            if status_short and status_short not in {"NS"}:
                 stats.skipped_status += 1
                 continue
-            if start_utc is not None and start_utc < min_start_utc:
+            if start_utc is None:
+                stats.skipped_no_time += 1
+                continue
+            if start_utc < min_start_utc:
                 stats.skipped_time += 1
                 continue
             if allowed and country and country.lower() not in allowed:
@@ -327,7 +326,10 @@ class DailyPipeline:
         stats.preferred = min(len(preferred_items), limit)
         stats.fallback = max(0, len(result) - stats.preferred)
         stats.accepted = len(result)
-        logger.info("Fixture filter: total=%s accepted=%s preferred=%s fallback=%s skipped_status=%s skipped_time=%s skipped_country=%s skipped_noise=%s", stats.total, stats.accepted, stats.preferred, stats.fallback, stats.skipped_status, stats.skipped_time, stats.skipped_country, stats.skipped_noise)
+        logger.info(
+            "Fixture filter: total=%s accepted=%s preferred=%s fallback=%s skipped_status=%s skipped_time=%s skipped_no_time=%s skipped_country=%s skipped_noise=%s",
+            stats.total, stats.accepted, stats.preferred, stats.fallback, stats.skipped_status, stats.skipped_time, stats.skipped_no_time, stats.skipped_country, stats.skipped_noise,
+        )
         return result, stats
 
     async def _load_existing_texts(self, date_key: str, provider_name: str) -> tuple[dict[str, str], dict[str, list[str]]] | None:
@@ -350,6 +352,18 @@ class DailyPipeline:
     async def _save_predictions(self, date_key: str, picks: list[AiPick], details: list[str], contexts: list[CandidateContext], provider_name: str) -> None:
         ctx_by_id = {c.fixture_id: c for c in contexts}
         async with SessionLocal() as session:
+            stale_rows = (await session.execute(
+                select(Prediction)
+                .where(Prediction.date_key == date_key)
+                .where(Prediction.provider == provider_name)
+            )).scalars().all()
+            current_fixture_ids = {pick.fixture_id for pick in picks}
+            for stale in stale_rows:
+                if stale.fixture_id not in current_fixture_ids and not stale.is_finished:
+                    stale.rendered_text = ""
+                    stale.private_message_refs = ""
+                    stale.public_message_refs = ""
+
             for index, pick in enumerate(picks):
                 rendered = details[index] if index < len(details) else ""
                 existing = (await session.execute(select(Prediction).where(Prediction.date_key == date_key).where(Prediction.provider == provider_name).where(Prediction.fixture_id == pick.fixture_id))).scalar_one_or_none()
@@ -360,6 +374,7 @@ class DailyPipeline:
                     existing.main_bet_code = pick.main_bet_code; existing.main_bet_label = pick.main_bet_label
                     existing.confidence = pick.confidence; existing.ai_rank_score = pick.ai_rank_score
                     existing.bookmaker_url = pick.bookmaker_url
+                    existing.start_time = ctx.start_time if ctx else existing.start_time
                 else:
                     session.add(Prediction(date_key=date_key, provider=provider_name, fixture_id=pick.fixture_id,
                         home_team=home, away_team=away, league_name=ctx.league_name if ctx else "",
@@ -379,44 +394,60 @@ def pick_start_sort_timestamp(pick: AiPick, ctx_by_id: dict[str, CandidateContex
 def context_start_sort_timestamp(ctx: CandidateContext | None) -> int:
     if not ctx:
         return 9999999999
-    raw = str(getattr(ctx, "start_time", "") or "").strip()
-    if not raw:
-        return 9999999999
-    try:
-        dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
-        if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=timezone.utc)
-        return int(dt.astimezone(timezone.utc).timestamp())
-    except Exception:
-        pass
-    match = re.search(r"(\d{1,2}):(\d{2})", raw)
-    if match:
-        return int(match.group(1)) * 3600 + int(match.group(2)) * 60
+    parsed = parse_datetime_to_utc(str(getattr(ctx, "start_time", "") or ""))
+    if parsed:
+        return int(parsed.timestamp())
     return 9999999999
 
 
 def fixture_start_utc(fixture: object) -> datetime | None:
+    """Определить старт матча в UTC для dict и RawFixture.
+
+    API-FOOTBALL в нашем RawFixture хранит date как ISO-строку и timestamp
+    как unix timestamp. Старый код ошибочно ожидал date.year/date.month как у
+    date-объекта, из-за чего время не парсилось и прошедшие матчи могли пройти.
+    """
     try:
         if isinstance(fixture, dict):
             timestamp = fixture.get("fixture", {}).get("timestamp")
             if timestamp:
                 return datetime.fromtimestamp(int(timestamp), tz=timezone.utc)
-            raw_date = fixture.get("fixture", {}).get("date") or ""
-            if raw_date:
-                dt = datetime.fromisoformat(str(raw_date).replace("Z", "+00:00"))
-                if dt.tzinfo is None:
-                    dt = dt.replace(tzinfo=timezone.utc)
-                return dt.astimezone(timezone.utc)
-        fixture_date = getattr(fixture, "date", None)
+            return parse_datetime_to_utc(str(fixture.get("fixture", {}).get("date") or ""))
+
+        timestamp = getattr(fixture, "timestamp", None)
+        if timestamp:
+            return datetime.fromtimestamp(int(timestamp), tz=timezone.utc)
+
+        raw_date = getattr(fixture, "date", None)
+        if isinstance(raw_date, str):
+            parsed = parse_datetime_to_utc(raw_date)
+            if parsed:
+                return parsed
+
+        fixture_date = raw_date
         fixture_time = str(getattr(fixture, "time", "") or "").strip()
-        if fixture_date:
+        if fixture_date and hasattr(fixture_date, "year"):
             if fixture_time and len(fixture_time) >= 5:
                 hh, mm = fixture_time[:5].split(":", 1)
                 return datetime(fixture_date.year, fixture_date.month, fixture_date.day, int(hh), int(mm), tzinfo=timezone.utc)
             return datetime(fixture_date.year, fixture_date.month, fixture_date.day, 23, 59, tzinfo=timezone.utc)
-    except Exception:
+    except Exception as exc:
+        logger.warning("Failed to parse fixture start time for %s: %s", safe_fixture_title(fixture), exc)
         return None
     return None
+
+
+def parse_datetime_to_utc(raw: str) -> datetime | None:
+    value = str(raw or "").strip()
+    if not value:
+        return None
+    try:
+        dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc)
+    except Exception:
+        return None
 
 
 def fixture_sort_key(fixture: object) -> int:
