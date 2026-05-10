@@ -15,6 +15,10 @@ from app.config import get_settings
 logger = logging.getLogger(__name__)
 
 
+class SerpApiRateLimited(RuntimeError):
+    """SerpAPI вернул 429: дальше искать нельзя, чтобы не сжигать лимит."""
+
+
 @dataclass(frozen=True)
 class BookmakerProvider:
     """Описание источника, где ищем точную страницу матча."""
@@ -26,6 +30,16 @@ class BookmakerProvider:
 
 
 PROVIDERS: dict[str, BookmakerProvider] = {
+    "pinnacle": BookmakerProvider(
+        key="pinnacle",
+        display_name="Pinnacle",
+        domains=("pinnacle.com",),
+        queries=(
+            'site:pinnacle.com/ru/soccer "{home}" "{away}"',
+            'site:pinnacle.com/en/soccer "{home}" "{away}"',
+            'site:pinnacle.com "{home}" "{away}" soccer odds',
+        ),
+    ),
     "oddschecker": BookmakerProvider(
         key="oddschecker",
         display_name="Oddschecker",
@@ -34,7 +48,6 @@ PROVIDERS: dict[str, BookmakerProvider] = {
             'site:oddschecker.com/football "{home}" "{away}"',
             'site:oddschecker.com/us/soccer "{home}" "{away}"',
             'site:oddschecker.com "{home} v {away}" football odds',
-            'site:oddschecker.com "{home} vs {away}" football odds',
         ),
     ),
     "ggbet": BookmakerProvider(
@@ -44,7 +57,6 @@ PROVIDERS: dict[str, BookmakerProvider] = {
         queries=(
             'site:ggbet.ua "{home}" "{away}" футбол',
             'site:ggbet.ua/uk-ua/bets "{home}" "{away}"',
-            'site:ggbet.ua/en/sports/soccer "{home}" "{away}"',
         ),
     ),
     "betking": BookmakerProvider(
@@ -62,13 +74,8 @@ PROVIDERS: dict[str, BookmakerProvider] = {
 class BookmakerResolver:
     """Поиск точной букмекерской страницы матча.
 
-    Принцип:
-    - сначала ищем Oddschecker, потому что у него чаще есть отдельные страницы матчей;
-    - потом пробуем украинские fallback-провайдеры;
-    - если точного совпадения обеих команд нет — ссылку не показываем.
-
-    Это лучше, чем вести пользователя на главную букмекера: если точной страницы нет,
-    кнопка букмекера просто скрывается.
+    Работает экономно: при первом 429 от SerpAPI прекращает поиск по матчу,
+    чтобы не делать ещё 5-10 бесполезных запросов.
     """
 
     def __init__(self) -> None:
@@ -99,6 +106,9 @@ class BookmakerResolver:
                 self._resolve_inner(home_team, away_team, provider_keys),
                 timeout=max(3, self.settings.news_timeout_seconds),
             )
+        except SerpApiRateLimited:
+            logger.warning("Bookmaker resolver stopped after SerpAPI 429 for %s — %s", home_team, away_team)
+            result = ("", "")
         except Exception as exc:
             logger.warning("Bookmaker resolver failed for %s — %s: %s", home_team, away_team, exc)
             result = ("", "")
@@ -109,11 +119,12 @@ class BookmakerResolver:
     def _provider_order(self) -> list[str]:
         """Собрать порядок провайдеров: primary + fallback без дублей."""
         result: list[str] = []
-        primary = (self.settings.bookmaker_resolver_provider or "oddschecker").strip().lower()
+        primary = (getattr(self.settings, "bookmaker_resolver_provider", "pinnacle") or "pinnacle").strip().lower()
         if primary:
             result.append(primary)
 
-        for provider in self.settings.bookmaker_fallback_providers:
+        fallback_raw = getattr(self.settings, "bookmaker_fallback_providers_raw", "oddschecker,ggbet,betking")
+        for provider in [x.strip().lower() for x in fallback_raw.split(",") if x.strip()]:
             if provider not in result:
                 result.append(provider)
 
@@ -149,13 +160,16 @@ class BookmakerResolver:
             "engine": "google",
             "q": query,
             "api_key": self.settings.serpapi_key,
-            "num": max(1, int(self.settings.bookmaker_resolver_max_results or 6)),
+            "num": max(1, int(getattr(self.settings, "bookmaker_resolver_max_results", 3) or 3)),
             "hl": "en",
         }
 
         timeout = aiohttp.ClientTimeout(total=max(3, self.settings.news_timeout_seconds))
         async with aiohttp.ClientSession(timeout=timeout) as session:
             async with session.get("https://serpapi.com/search.json", params=params) as response:
+                if response.status == 429:
+                    logger.warning("SerpAPI bookmaker search HTTP 429 provider=%s query=%s", provider.key, query)
+                    raise SerpApiRateLimited()
                 if response.status >= 400:
                     logger.warning(
                         "SerpAPI bookmaker search HTTP %s provider=%s query=%s",
@@ -254,11 +268,7 @@ def teams_match(haystack: str, home_norm: str, away_norm: str) -> bool:
 
 
 def token_match(haystack: str, team_norm: str) -> bool:
-    """Нестрогое совпадение команды по значимым токенам.
-
-    Нужно для случаев New York City FC -> new york city,
-    Racing Club -> racing, Columbus Crew -> columbus crew.
-    """
+    """Нестрогое совпадение команды по значимым токенам."""
     tokens = [t for t in team_norm.split() if len(t) >= 3]
     if not tokens:
         return False
@@ -266,10 +276,8 @@ def token_match(haystack: str, team_norm: str) -> bool:
     if team_norm in haystack:
         return True
 
-    # Для коротких названий достаточно одного сильного токена.
     if len(tokens) == 1:
         return tokens[0] in haystack
 
     matched = sum(1 for token in tokens if token in haystack)
-    required = 2 if len(tokens) >= 2 else 1
-    return matched >= required
+    return matched >= 2
