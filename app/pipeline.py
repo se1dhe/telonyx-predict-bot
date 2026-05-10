@@ -206,22 +206,13 @@ class DailyPipeline:
         return summaries, details_by_lang
 
     def _single_language_result(self, summary: str, details: list[str]) -> tuple[dict[str, str], dict[str, list[str]]]:
-        """Завернуть служебный одноязычный ответ в новый формат для всех активных языков."""
-        return (
-            {lang: summary for lang in self.settings.render_languages},
-            {lang: details for lang in self.settings.render_languages},
-        )
+        return ({lang: summary for lang in self.settings.render_languages}, {lang: details for lang in self.settings.render_languages})
 
     def _no_quality_matches_result(self) -> tuple[dict[str, str], dict[str, list[str]]]:
-        """Языковой ответ, когда качественных матчей нет."""
-        summaries = {
-            lang: render_daily_summary([], [], provider=self.settings.provider_normalized, contexts_by_id={}, lang=lang)
-            for lang in self.settings.render_languages
-        }
+        summaries = {lang: render_daily_summary([], [], provider=self.settings.provider_normalized, contexts_by_id={}, lang=lang) for lang in self.settings.render_languages}
         return summaries, {lang: [] for lang in self.settings.render_languages}
 
     def _split_pick_teams(self, pick: AiPick) -> tuple[str, str]:
-        """Получить home/away из match_title."""
         if "—" in pick.match_title:
             home, away = pick.match_title.split("—", 1)
             return home.strip(), away.strip()
@@ -232,8 +223,17 @@ class DailyPipeline:
         return pick.match_title.strip(), ""
 
     async def _resolve_bookmaker_links(self, picks: list[AiPick]) -> None:
-        """Найти точные bookmaker event URLs для выбранных матчей."""
+        """Утром не ищем букмекера, если включён late-refresh.
+
+        Точные страницы часто появляются ближе к старту матча, поэтому основной
+        поиск делает отдельный scheduler job за 10 минут до начала. Так мы не
+        тратим SerpAPI утром и не публикуем мусорные ссылки.
+        """
         if not self.settings.bookmaker_link_enabled:
+            return
+
+        if getattr(self.settings, "bookmaker_late_refresh_enabled", True):
+            logger.info("Bookmaker resolving deferred until late refresh window")
             return
 
         for pick in picks:
@@ -245,7 +245,7 @@ class DailyPipeline:
             pick.bookmaker_url = url
 
             if provider_name:
-                pick.bookmaker_name = provider_name
+                setattr(pick, "bookmaker_name", provider_name)
 
             if url:
                 logger.info("Bookmaker exact URL set for %s: %s", pick.match_title, url)
@@ -253,26 +253,18 @@ class DailyPipeline:
                 logger.info("Bookmaker exact URL not found for %s; bookmaker button hidden", pick.match_title)
 
     def _log_selected_picks(self, picks: list[AiPick]) -> None:
-        """Писать в Railway Logs reasoning/уверенность по выбранным матчум."""
         if not self.settings.log_ai_reasoning:
             return
 
         for index, pick in enumerate(picks, start=1):
             logger.info(
                 "SELECTED PICK #%s | match=%s | bet=%s | confidence=%s/100 | risk=%s | score=%s | source=%s",
-                index,
-                pick.match_title,
-                pick.main_bet_label,
-                pick.confidence,
-                pick.risk_level,
-                pick.expected_score,
-                getattr(pick, "pick_source", ""),
+                index, pick.match_title, pick.main_bet_label, pick.confidence, pick.risk_level, pick.expected_score, getattr(pick, "pick_source", ""),
             )
             logger.info("SELECTED PICK #%s | why=%s", index, pick.why_this_match_is_gold)
             logger.info("SELECTED PICK #%s | reasoning=%s", index, pick.reasoning)
 
     def _enrich_picks_with_context(self, picks: list[AiPick], contexts: list[CandidateContext]) -> list[AiPick]:
-        """Синхронизировать ссылку/дату/турнир прогноза с исходным контекстом."""
         ctx_by_id = {ctx.fixture_id: ctx for ctx in contexts}
         for pick in picks:
             ctx = ctx_by_id.get(pick.fixture_id)
@@ -282,13 +274,6 @@ class DailyPipeline:
         return picks
 
     def _filter_raw_fixtures(self, fixtures: list) -> tuple[list, FixtureFilterStats]:
-        """Первичный фильтр матчей.
-
-        Важно: PREFERRED_LEAGUE_IDS теперь не whitelist, а приоритет сортировки.
-        То есть preferred-лиги идут первыми, но если их мало — добираем матчи из
-        разрешённых стран. Точность сохраняется следующими слоями:
-        context score, data quality, AI, safe-mode.
-        """
         allowed = self.settings.allowed_countries
         preferred = set(str(x) for x in self.settings.preferred_league_ids)
         preferred_items = []
@@ -317,17 +302,15 @@ class DailyPipeline:
             if status_short and status_short not in {"NS", "TBD"}:
                 stats.skipped_status += 1
                 continue
-
             if start_utc is not None and start_utc < min_start_utc:
                 stats.skipped_time += 1
                 continue
-
             if allowed and country and country.lower() not in allowed:
                 stats.skipped_country += 1
                 continue
 
             text = f"{league_name} {country}".lower()
-            if any(w in text for w in ["u17", "u19", "u20", "u21", "women", "amateur", "esoccer", "virtual", "friendly"]):
+            if any(w in text for w in ["u17", "u19", "u20", "u21", "women", " w league", "feminino", "femenina", "ladies", "amateur", "esoccer", "virtual", "friendly"]):
                 stats.skipped_noise += 1
                 continue
 
@@ -344,18 +327,7 @@ class DailyPipeline:
         stats.preferred = min(len(preferred_items), limit)
         stats.fallback = max(0, len(result) - stats.preferred)
         stats.accepted = len(result)
-
-        logger.info(
-            "Fixture filter: total=%s accepted=%s preferred=%s fallback=%s skipped_status=%s skipped_time=%s skipped_country=%s skipped_noise=%s",
-            stats.total,
-            stats.accepted,
-            stats.preferred,
-            stats.fallback,
-            stats.skipped_status,
-            stats.skipped_time,
-            stats.skipped_country,
-            stats.skipped_noise,
-        )
+        logger.info("Fixture filter: total=%s accepted=%s preferred=%s fallback=%s skipped_status=%s skipped_time=%s skipped_country=%s skipped_noise=%s", stats.total, stats.accepted, stats.preferred, stats.fallback, stats.skipped_status, stats.skipped_time, stats.skipped_country, stats.skipped_noise)
         return result, stats
 
     async def _load_existing_texts(self, date_key: str, provider_name: str) -> tuple[dict[str, str], dict[str, list[str]]] | None:
@@ -387,18 +359,18 @@ class DailyPipeline:
                     existing.prediction_json = pick.model_dump_json(); existing.rendered_text = rendered
                     existing.main_bet_code = pick.main_bet_code; existing.main_bet_label = pick.main_bet_label
                     existing.confidence = pick.confidence; existing.ai_rank_score = pick.ai_rank_score
+                    existing.bookmaker_url = pick.bookmaker_url
                 else:
                     session.add(Prediction(date_key=date_key, provider=provider_name, fixture_id=pick.fixture_id,
                         home_team=home, away_team=away, league_name=ctx.league_name if ctx else "",
                         country=ctx.country if ctx else "", start_time=ctx.start_time if ctx else "",
                         source_league_code=ctx.source_league_code if ctx else "", prediction_json=pick.model_dump_json(),
                         rendered_text=rendered, main_bet_code=pick.main_bet_code, main_bet_label=pick.main_bet_label,
-                        confidence=pick.confidence, ai_rank_score=pick.ai_rank_score))
+                        confidence=pick.confidence, ai_rank_score=pick.ai_rank_score, bookmaker_url=pick.bookmaker_url))
             await session.commit()
 
 
 def pick_start_sort_timestamp(pick: AiPick, ctx_by_id: dict[str, CandidateContext]) -> tuple[int, int]:
-    """Ключ сортировки финальных прогнозов для публикации."""
     ctx = ctx_by_id.get(pick.fixture_id)
     ts = context_start_sort_timestamp(ctx)
     return ts, -int(getattr(pick, "ai_rank_score", 0) or 0)
@@ -407,11 +379,9 @@ def pick_start_sort_timestamp(pick: AiPick, ctx_by_id: dict[str, CandidateContex
 def context_start_sort_timestamp(ctx: CandidateContext | None) -> int:
     if not ctx:
         return 9999999999
-
     raw = str(getattr(ctx, "start_time", "") or "").strip()
     if not raw:
         return 9999999999
-
     try:
         dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
         if dt.tzinfo is None:
@@ -419,62 +389,37 @@ def context_start_sort_timestamp(ctx: CandidateContext | None) -> int:
         return int(dt.astimezone(timezone.utc).timestamp())
     except Exception:
         pass
-
     match = re.search(r"(\d{1,2}):(\d{2})", raw)
     if match:
-        hh = int(match.group(1))
-        mm = int(match.group(2))
-        return hh * 3600 + mm * 60
-
+        return int(match.group(1)) * 3600 + int(match.group(2)) * 60
     return 9999999999
 
 
 def fixture_start_utc(fixture: object) -> datetime | None:
-    """Определить старт матча в UTC."""
     try:
         if isinstance(fixture, dict):
             timestamp = fixture.get("fixture", {}).get("timestamp")
             if timestamp:
                 return datetime.fromtimestamp(int(timestamp), tz=timezone.utc)
-
             raw_date = fixture.get("fixture", {}).get("date") or ""
             if raw_date:
                 dt = datetime.fromisoformat(str(raw_date).replace("Z", "+00:00"))
                 if dt.tzinfo is None:
                     dt = dt.replace(tzinfo=timezone.utc)
                 return dt.astimezone(timezone.utc)
-
         fixture_date = getattr(fixture, "date", None)
         fixture_time = str(getattr(fixture, "time", "") or "").strip()
-
         if fixture_date:
             if fixture_time and len(fixture_time) >= 5:
                 hh, mm = fixture_time[:5].split(":", 1)
-                return datetime(
-                    fixture_date.year,
-                    fixture_date.month,
-                    fixture_date.day,
-                    int(hh),
-                    int(mm),
-                    tzinfo=timezone.utc,
-                )
-
-            return datetime(
-                fixture_date.year,
-                fixture_date.month,
-                fixture_date.day,
-                23,
-                59,
-                tzinfo=timezone.utc,
-            )
+                return datetime(fixture_date.year, fixture_date.month, fixture_date.day, int(hh), int(mm), tzinfo=timezone.utc)
+            return datetime(fixture_date.year, fixture_date.month, fixture_date.day, 23, 59, tzinfo=timezone.utc)
     except Exception:
         return None
-
     return None
 
 
 def fixture_sort_key(fixture: object) -> int:
-    """Обратная совместимость со старым именем сортировки."""
     return fixture_sort_timestamp(fixture)
 
 
@@ -482,10 +427,8 @@ def fixture_sort_timestamp(fixture: object) -> int:
     start = fixture_start_utc(fixture)
     if start is not None:
         return int(start.timestamp())
-
     if isinstance(fixture, dict):
         return int(fixture.get("fixture", {}).get("timestamp") or 9999999999)
-
     return int(getattr(fixture, "timestamp", None) or 9999999999)
 
 
