@@ -145,18 +145,37 @@ async def init_db() -> None:
 
 async def ensure_runtime_columns(conn) -> None:
     """Мини-миграции без Alembic."""
-    columns = {
+    bot_user_columns = {
         "notified_24h_at": "DATETIME",
         "notified_5h_at": "DATETIME",
         "notified_1h_at": "DATETIME",
         "kicked_at": "DATETIME",
     }
 
-    for name, sqlite_type in columns.items():
+    prediction_columns = {
+        "bookmaker_url": "TEXT",
+        "bookmaker_name": "TEXT",
+        "bookmaker_checked_at": "DATETIME",
+        "bookmaker_resolved_at": "DATETIME",
+        "private_message_refs": "TEXT",
+        "public_message_refs": "TEXT",
+    }
+
+    for name, sqlite_type in bot_user_columns.items():
         try:
             if IS_SQLITE:
                 await conn.execute(text(f"ALTER TABLE bot_users ADD COLUMN {name} {sqlite_type}"))
             else:
                 await conn.execute(text(f"ALTER TABLE bot_users ADD COLUMN IF NOT EXISTS {name} TIMESTAMP"))
+        except Exception:
+            pass
+
+    for name, sqlite_type in prediction_columns.items():
+        try:
+            if IS_SQLITE:
+                await conn.execute(text(f"ALTER TABLE predictions ADD COLUMN {name} {sqlite_type}"))
+            else:
+                pg_type = "TIMESTAMP" if name.endswith("_at") else "TEXT"
+                await conn.execute(text(f"ALTER TABLE predictions ADD COLUMN IF NOT EXISTS {name} {pg_type}"))
         except Exception:
             pass
