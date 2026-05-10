@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 import logging
 import traceback
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 from aiogram import Bot
 from aiogram.enums import ParseMode
@@ -52,7 +54,6 @@ async def safe_send_html(
             disable_web_page_preview=disable_web_page_preview,
             reply_markup=reply_markup,
         )
-
     except Exception as exc:
         logger.exception("Не удалось отправить HTML-сообщение в Telegram chat_id=%s", chat_id)
         logger.error("Telegram send error: %s", exc)
@@ -152,7 +153,11 @@ async def send_daily_gold_matches(bot: Bot) -> None:
                         reply_markup=public_reply_markup,
                     )
 
-            await save_sent_message_refs(private_refs_by_index, public_refs_by_index)
+            await save_sent_message_refs(
+                private_refs_by_index,
+                public_refs_by_index,
+                expected_count=total_details,
+            )
 
     except asyncio.TimeoutError:
         logger.exception("Pipeline завис дольше разрешённого времени")
@@ -160,7 +165,6 @@ async def send_daily_gold_matches(bot: Bot) -> None:
             bot,
             "⚠️ Prediction collection stopped by timeout.\n\nDetails are written to Railway Logs.",
         )
-
     except Exception:
         logger.exception("Ошибка при сборе прогнозов")
         logger.error("Полный traceback:\n%s", traceback.format_exc())
@@ -173,31 +177,44 @@ async def send_daily_gold_matches(bot: Bot) -> None:
 async def save_sent_message_refs(
     private_refs_by_index: dict[int, list[PostRef]],
     public_refs_by_index: dict[int, list[PostRef]],
+    expected_count: int,
 ) -> None:
-    """Сохранить message_id отправленных карточек прогнозов."""
+    """Сохранить message_id только для прогнозов текущего запуска.
+
+    Раньше функция брала все predictions последней даты и могла сохранить refs
+    для старых строк, если за день был повторный RUN_ON_START/redeploy. Теперь
+    берём только сегодняшние опубликованные карточки и обрезаем список по
+    количеству реально отправленных деталей.
+    """
     if not private_refs_by_index and not public_refs_by_index:
         return
 
     settings = get_settings()
     provider = settings.provider_normalized
+    date_key = datetime.now(ZoneInfo(settings.tz)).date().isoformat()
 
     async with SessionLocal() as session:
         rows = (await session.execute(
             select(Prediction)
             .where(Prediction.provider == provider)
+            .where(Prediction.date_key == date_key)
+            .where(Prediction.rendered_text != "")
             .order_by(Prediction.start_time.asc(), Prediction.ai_rank_score.desc())
         )).scalars().all()
 
-        # Берём только сегодняшнюю пачку по последнему date_key.
-        date_key = rows[-1].date_key if rows else ""
-        rows = [row for row in rows if row.date_key == date_key]
+        rows = rows[:expected_count]
 
         for index, prediction in enumerate(rows):
             prediction.private_message_refs = dumps_refs(private_refs_by_index.get(index, []))
             prediction.public_message_refs = dumps_refs(public_refs_by_index.get(index, []))
 
         await session.commit()
-        logger.info("Saved Telegram message refs for predictions=%s date=%s", len(rows), date_key)
+        logger.info(
+            "Saved Telegram message refs for predictions=%s date=%s expected=%s",
+            len(rows),
+            date_key,
+            expected_count,
+        )
 
 
 async def check_results(bot: Bot) -> None:
@@ -205,7 +222,6 @@ async def check_results(bot: Bot) -> None:
     try:
         logger.info("Запускаю проверку результатов")
         await ResultChecker(bot).check_open_predictions()
-
     except Exception:
         logger.exception("Ошибка при проверке результатов")
         logger.error("Полный traceback:\n%s", traceback.format_exc())
@@ -237,7 +253,6 @@ async def send_daily_stats_report(bot: Bot) -> None:
         logger.info("Запускаю ежедневный отчёт статистики")
         sent = await ResultChecker(bot).send_daily_stats_report(force=False)
         logger.info("Ежедневный отчёт статистики отправлен: %s", sent)
-
     except Exception:
         logger.exception("Ошибка при отправке статистики")
         logger.error("Полный traceback:\n%s", traceback.format_exc())
