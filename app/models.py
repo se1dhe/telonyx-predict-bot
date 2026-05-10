@@ -36,6 +36,15 @@ class Prediction(Base):
     main_bet_label: Mapped[str] = mapped_column(String(128), default="")
     confidence: Mapped[int] = mapped_column(Integer, default=0)
     ai_rank_score: Mapped[int] = mapped_column(Integer, default=0)
+
+    # Bookmaker/post-update runtime fields.
+    bookmaker_url: Mapped[str] = mapped_column(Text, default="")
+    bookmaker_name: Mapped[str] = mapped_column(String(128), default="")
+    bookmaker_checked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    bookmaker_resolved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    private_message_refs: Mapped[str] = mapped_column(Text, default="")
+    public_message_refs: Mapped[str] = mapped_column(Text, default="")
+
     is_finished: Mapped[bool] = mapped_column(Boolean, default=False)
     is_success: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     final_home_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
