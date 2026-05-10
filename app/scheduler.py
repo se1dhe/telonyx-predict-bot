@@ -6,14 +6,20 @@ import traceback
 
 from aiogram import Bot
 from aiogram.enums import ParseMode
+from aiogram.types import Message
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from sqlalchemy import select
 
 from app.config import get_settings
+from app.db import SessionLocal
 from app.i18n import normalize_lang
+from app.models import Prediction
 from app.pipeline import DailyPipeline
 from app.result_checker import ResultChecker
+from app.services.bookmaker_post_updater import BookmakerPostUpdater
 from app.services.channel_render import private_summary, public_summary_from_private
 from app.services.channel_buttons import public_channel_cta_keyboard
+from app.services.post_refs import PostRef, dumps_refs
 from app.services.subscription_guard import check_subscriptions
 
 
@@ -28,32 +34,30 @@ async def safe_send_html(
     text: str,
     disable_web_page_preview: bool = True,
     reply_markup: dict | None = None,
-) -> bool:
+) -> Message | None:
     """Безопасно отправить HTML в Telegram.
 
-    Важно: если Telegram вернул chat not found / bot is not admin,
-    не отправляем fallback в тот же chat_id, иначе весь daily job падает.
-    Возвращаем True/False и пишем точную ошибку в Railway Logs.
+    Возвращаем Message, чтобы сохранить message_id и позже отредактировать
+    прогноз букмекерской ссылкой за 10 минут до старта.
     """
     if not str(chat_id or "").strip():
         logger.info("Telegram send skipped: empty chat_id")
-        return False
+        return None
 
     try:
-        await bot.send_message(
+        return await bot.send_message(
             chat_id=chat_id,
             text=text,
             parse_mode=ParseMode.HTML,
             disable_web_page_preview=disable_web_page_preview,
             reply_markup=reply_markup,
         )
-        return True
 
     except Exception as exc:
         logger.exception("Не удалось отправить HTML-сообщение в Telegram chat_id=%s", chat_id)
         logger.error("Telegram send error: %s", exc)
         logger.error("Проблемный текст сообщения:\n%s", text)
-        return False
+        return None
 
 
 def _get_lang_text(data: dict[str, str], lang: str) -> str:
@@ -81,11 +85,7 @@ async def _notify_admin_channels(bot: Bot, text: str) -> None:
 
 
 async def send_daily_gold_matches(bot: Bot) -> None:
-    """Ежедневный запуск прогнозов.
-
-    Один анализ матчей рендерится в разные языковые каналы.
-    Если канал для языка не заполнен в .env — этот язык пропускается.
-    """
+    """Ежедневный запуск прогнозов."""
     settings = get_settings()
 
     if pipeline_lock.locked():
@@ -103,6 +103,9 @@ async def send_daily_gold_matches(bot: Bot) -> None:
             total_details = max((len(v) for v in details_by_lang.values()), default=0)
             logger.info("Сводка собрана. Детальных прогнозов: %s", total_details)
 
+            private_refs_by_index: dict[int, list[PostRef]] = {}
+            public_refs_by_index: dict[int, list[PostRef]] = {}
+
             # Приватные каналы: полная сводка + все карточки.
             for lang in settings.active_private_languages:
                 private_chat = settings.private_channel_for(lang)
@@ -112,12 +115,16 @@ async def send_daily_gold_matches(bot: Bot) -> None:
                 await safe_send_html(bot, private_chat, private_summary(summary, lang=lang))
 
                 if settings.show_detailed_picks:
-                    for detail in details:
-                        await safe_send_html(
+                    for index, detail in enumerate(details):
+                        msg = await safe_send_html(
                             bot,
                             private_chat,
                             detail[:3850] + "\n\n..." if len(detail) > 3900 else detail,
                         )
+                        if msg:
+                            private_refs_by_index.setdefault(index, []).append(
+                                PostRef(lang=lang, chat_id=str(private_chat), message_id=msg.message_id, kind="private")
+                            )
 
             # Публичные каналы: только самый сильный матч дня + зелёная CTA-кнопка.
             for lang in settings.active_public_languages:
@@ -127,12 +134,16 @@ async def send_daily_gold_matches(bot: Bot) -> None:
                 public_reply_markup = public_channel_cta_keyboard(lang)
 
                 if details:
-                    await safe_send_html(
+                    msg = await safe_send_html(
                         bot,
                         public_chat,
                         public_summary_from_private(summary, details[0][:3400], lang=lang),
                         reply_markup=public_reply_markup,
                     )
+                    if msg:
+                        public_refs_by_index.setdefault(0, []).append(
+                            PostRef(lang=lang, chat_id=str(public_chat), message_id=msg.message_id, kind="public")
+                        )
                 else:
                     await safe_send_html(
                         bot,
@@ -140,6 +151,8 @@ async def send_daily_gold_matches(bot: Bot) -> None:
                         public_summary_from_private(summary, None, lang=lang),
                         reply_markup=public_reply_markup,
                     )
+
+            await save_sent_message_refs(private_refs_by_index, public_refs_by_index)
 
     except asyncio.TimeoutError:
         logger.exception("Pipeline завис дольше разрешённого времени")
@@ -157,6 +170,36 @@ async def send_daily_gold_matches(bot: Bot) -> None:
         )
 
 
+async def save_sent_message_refs(
+    private_refs_by_index: dict[int, list[PostRef]],
+    public_refs_by_index: dict[int, list[PostRef]],
+) -> None:
+    """Сохранить message_id отправленных карточек прогнозов."""
+    if not private_refs_by_index and not public_refs_by_index:
+        return
+
+    settings = get_settings()
+    provider = settings.provider_normalized
+
+    async with SessionLocal() as session:
+        rows = (await session.execute(
+            select(Prediction)
+            .where(Prediction.provider == provider)
+            .order_by(Prediction.start_time.asc(), Prediction.ai_rank_score.desc())
+        )).scalars().all()
+
+        # Берём только сегодняшнюю пачку по последнему date_key.
+        date_key = rows[-1].date_key if rows else ""
+        rows = [row for row in rows if row.date_key == date_key]
+
+        for index, prediction in enumerate(rows):
+            prediction.private_message_refs = dumps_refs(private_refs_by_index.get(index, []))
+            prediction.public_message_refs = dumps_refs(public_refs_by_index.get(index, []))
+
+        await session.commit()
+        logger.info("Saved Telegram message refs for predictions=%s date=%s", len(rows), date_key)
+
+
 async def check_results(bot: Bot) -> None:
     """Проверить результаты открытых прогнозов."""
     try:
@@ -170,6 +213,16 @@ async def check_results(bot: Bot) -> None:
             bot,
             "⚠️ Error while checking results.\n\nDetails are written to Railway Logs.",
         )
+
+
+async def refresh_bookmaker_links(bot: Bot) -> None:
+    """За 10 минут до старта пробуем добавить точную ссылку букмекера в уже опубликованный пост."""
+    try:
+        updated = await BookmakerPostUpdater(bot).update_due_predictions()
+        if updated:
+            logger.info("Bookmaker links refreshed and Telegram posts edited: %s", updated)
+    except Exception:
+        logger.exception("Ошибка при позднем обновлении букмекерских ссылок")
 
 
 async def send_daily_stats_report(bot: Bot) -> None:
@@ -223,6 +276,15 @@ def setup_scheduler(bot: Bot) -> AsyncIOScheduler:
         minutes=settings.result_check_interval_minutes,
         args=[bot],
         id="check_results",
+        replace_existing=True,
+    )
+
+    scheduler.add_job(
+        refresh_bookmaker_links,
+        trigger="interval",
+        minutes=int(getattr(settings, "bookmaker_late_refresh_interval_minutes", 5) or 5),
+        args=[bot],
+        id="refresh_bookmaker_links",
         replace_existing=True,
     )
 
