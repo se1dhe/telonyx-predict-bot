@@ -2,6 +2,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+from dataclasses import dataclass
 from datetime import date, datetime, timezone, timedelta
 from html import escape
 from zoneinfo import ZoneInfo
@@ -15,20 +16,35 @@ from app.services.news_search import NewsSearchClient
 from app.services.provider_factory import get_data_provider
 from app.services.rule_based_selector import RuleBasedSelector
 from app.services.render import render_daily_summary, render_pick_detail
-from app.services.draftkings_resolver import DraftKingsResolver
+from app.services.bookmaker_resolver import BookmakerResolver
 from app.services.learning_calibrator import LearningCalibrator
 
 logger = logging.getLogger(__name__)
 
+
+@dataclass
+class FixtureFilterStats:
+    """Диагностика первичного фильтра матчей."""
+
+    total: int = 0
+    accepted: int = 0
+    preferred: int = 0
+    fallback: int = 0
+    skipped_status: int = 0
+    skipped_time: int = 0
+    skipped_country: int = 0
+    skipped_noise: int = 0
+
+
 class DailyPipeline:
-    """Джерело даних → фільтри → новини → AI → самообучение → база."""
+    """Джерело даних → фільтри → новини → AI → safe-mode/learning observer → база."""
     def __init__(self) -> None:
         self.settings = get_settings()
         self.provider = get_data_provider()
         self.news = NewsSearchClient()
         self.ai = AiSelector()
         self.rule_based = RuleBasedSelector()
-        self.draftkings = DraftKingsResolver()
+        self.bookmaker = BookmakerResolver()
         self.learning = LearningCalibrator()
 
     async def run_for_today(self, force: bool = False) -> tuple[dict[str, str], dict[str, list[str]]]:
@@ -53,15 +69,17 @@ class DailyPipeline:
             await self._save_daily_run(date_key, summary, 0)
             return self._single_language_result(summary, [])
         debug.append(f"📦 Матчів від джерела: {len(raw_fixtures)}")
-        raw_fixtures = self._filter_raw_fixtures(raw_fixtures)
+        raw_fixtures, filter_stats = self._filter_raw_fixtures(raw_fixtures)
         debug.append(f"🔎 Після первинного фільтра: {len(raw_fixtures)}")
+        debug.append(
+            "🧮 Фільтр: "
+            f"preferred={filter_stats.preferred}, fallback={filter_stats.fallback}, "
+            f"status={filter_stats.skipped_status}, time={filter_stats.skipped_time}, "
+            f"country={filter_stats.skipped_country}, noise={filter_stats.skipped_noise}"
+        )
         contexts: list[CandidateContext] = []
         errors, rejected = [], []
 
-        # v44: API-FOOTBALL paid может вернуть 1000+ матчей за день.
-        # Контекст собираем только по уже отфильтрованному лимиту и не ждём вечность:
-        # каждый матч имеет индивидуальный timeout, новости SerpAPI добавляются только
-        # после скоринга для топ-кандидатов.
         for fixture in raw_fixtures[:self.settings.max_raw_events]:
             try:
                 ctx = await asyncio.wait_for(
@@ -138,21 +156,15 @@ class DailyPipeline:
 
         picks = self._enrich_picks_with_context(ai_response.selected, contexts)
 
-        # v46: финальный safety/learning слой перед публикацией.
-        # AI/fallback может выбрать красивый, но исторически слабый рынок.
-        # Калибратор смотрит закрытые predictions и отсекает плохие паттерны.
         try:
             picks, learning_rejected = await self.learning.apply(picks, contexts)
             if learning_rejected:
                 ai_response.rejected_summary.extend([f"Learning: {item}" for item in learning_rejected])
-                debug.append(f"🧬 Learning відсіяв: {len(learning_rejected)}")
+                debug.append(f"🧬 Safe-mode відсіяв/змінив: {len(learning_rejected)}")
         except Exception as exc:
             logger.exception("Learning calibrator failed, continue without calibration")
             debug.append(f"⚠️ Learning calibrator error: <code>{escape(str(exc)[:500])}</code>")
 
-        # v45: порядок публикации в Telegram должен быть хронологическим.
-        # AI всё ещё выбирает лучшие матчи, но выводим их по времени старта:
-        # сначала матч, который начнётся раньше.
         ctx_by_id_for_sort = {c.fixture_id: c for c in contexts}
         picks.sort(key=lambda p: pick_start_sort_timestamp(p, ctx_by_id_for_sort))
 
@@ -167,7 +179,6 @@ class DailyPipeline:
             return self._no_quality_matches_result()
         ctx_by_id = {ctx.fixture_id: ctx for ctx in contexts}
 
-        # Один анализ — несколько языковых рендеров.
         summaries: dict[str, str] = {}
         details_by_lang: dict[str, list[str]] = {}
 
@@ -186,7 +197,6 @@ class DailyPipeline:
             summaries[lang] = summary
             details_by_lang[lang] = [render_pick_detail(p, ctx_by_id.get(p.fixture_id), lang=lang) for p in picks]
 
-        # Техническую диагностику не показываем пользователю, только в Railway Logs.
         logger.info("Техническая диагностика daily run:\n%s", "\n".join(debug))
 
         uk_summary = summaries.get("uk") or next(iter(summaries.values()))
@@ -194,7 +204,6 @@ class DailyPipeline:
         await self._save_predictions(date_key, picks, uk_details, contexts, provider_name)
         await self._save_daily_run(date_key, uk_summary, len(picks))
         return summaries, details_by_lang
-
 
     def _single_language_result(self, summary: str, details: list[str]) -> tuple[dict[str, str], dict[str, list[str]]]:
         """Завернуть служебный одноязычный ответ в новый формат для всех активных языков."""
@@ -223,7 +232,7 @@ class DailyPipeline:
         return pick.match_title.strip(), ""
 
     async def _resolve_bookmaker_links(self, picks: list[AiPick]) -> None:
-        """Найти точные DraftKings event URLs для выбранных матчей."""
+        """Найти точные bookmaker event URLs для выбранных матчей."""
         if not self.settings.bookmaker_link_enabled:
             return
 
@@ -232,13 +241,16 @@ class DailyPipeline:
             if not home or not away:
                 continue
 
-            url = await self.draftkings.resolve(home, away)
+            url, provider_name = await self.bookmaker.resolve(home, away)
             pick.bookmaker_url = url
 
+            if provider_name:
+                pick.bookmaker_name = provider_name
+
             if url:
-                logger.info("Bookmaker URL set for %s: %s", pick.match_title, url)
+                logger.info("Bookmaker exact URL set for %s: %s", pick.match_title, url)
             else:
-                logger.info("Bookmaker URL not found for %s", pick.match_title)
+                logger.info("Bookmaker exact URL not found for %s; bookmaker button hidden", pick.match_title)
 
     def _log_selected_picks(self, picks: list[AiPick]) -> None:
         """Писать в Railway Logs reasoning/уверенность по выбранным матчум."""
@@ -266,22 +278,22 @@ class DailyPipeline:
             ctx = ctx_by_id.get(pick.fixture_id)
             if not ctx:
                 continue
-            # AI обязан брать tracking_url из контекста, но дополнительно страхуемся.
             pick.tracking_url = ctx.tracking_url
         return picks
 
-    def _filter_raw_fixtures(self, fixtures: list) -> list:
+    def _filter_raw_fixtures(self, fixtures: list) -> tuple[list, FixtureFilterStats]:
         """Первичный фильтр матчей.
 
-        Главная защита v34:
-        - не отдаём в прогнозы уже начавшиеся/прошедшие матчи;
-        - оставляем только матчи, которые стартуют минимум через
-          MIN_MATCH_START_LEAD_MINUTES минут;
-        - LOCAL-источники тоже проходят этот фильтр, а не возвращаются «как есть».
+        Важно: PREFERRED_LEAGUE_IDS теперь не whitelist, а приоритет сортировки.
+        То есть preferred-лиги идут первыми, но если их мало — добираем матчи из
+        разрешённых стран. Точность сохраняется следующими слоями:
+        context score, data quality, AI, safe-mode.
         """
         allowed = self.settings.allowed_countries
         preferred = set(str(x) for x in self.settings.preferred_league_ids)
-        result = []
+        preferred_items = []
+        fallback_items = []
+        stats = FixtureFilterStats(total=len(fixtures))
 
         now_utc = datetime.now(timezone.utc)
         min_start_utc = now_utc + timedelta(minutes=max(0, self.settings.min_match_start_lead_minutes))
@@ -302,35 +314,49 @@ class DailyPipeline:
                 league_name = str(getattr(fixture, "league_name", ""))
                 start_utc = fixture_start_utc(fixture)
 
-            # Берём только запланированные матчи.
             if status_short and status_short not in {"NS", "TBD"}:
+                stats.skipped_status += 1
                 continue
 
-            # Если удалось определить старт — матч должен быть строго будущим.
             if start_utc is not None and start_utc < min_start_utc:
-                logger.info(
-                    "Fixture skipped because already started/past: %s start_utc=%s min_start_utc=%s",
-                    safe_fixture_title(fixture),
-                    start_utc.isoformat(),
-                    min_start_utc.isoformat(),
-                )
+                stats.skipped_time += 1
                 continue
 
             if allowed and country and country.lower() not in allowed:
-                continue
-
-            if preferred and league_id and league_id not in preferred:
+                stats.skipped_country += 1
                 continue
 
             text = f"{league_name} {country}".lower()
             if any(w in text for w in ["u17", "u19", "u20", "u21", "women", "amateur", "esoccer", "virtual", "friendly"]):
+                stats.skipped_noise += 1
                 continue
 
-            result.append(fixture)
+            if preferred and league_id in preferred:
+                preferred_items.append(fixture)
+            else:
+                fallback_items.append(fixture)
 
-        result.sort(key=lambda f: fixture_sort_timestamp(f))
-        return result[: self.settings.max_raw_events]
+        preferred_items.sort(key=lambda f: fixture_sort_timestamp(f))
+        fallback_items.sort(key=lambda f: fixture_sort_timestamp(f))
 
+        limit = max(1, self.settings.max_raw_events)
+        result = (preferred_items + fallback_items)[:limit]
+        stats.preferred = min(len(preferred_items), limit)
+        stats.fallback = max(0, len(result) - stats.preferred)
+        stats.accepted = len(result)
+
+        logger.info(
+            "Fixture filter: total=%s accepted=%s preferred=%s fallback=%s skipped_status=%s skipped_time=%s skipped_country=%s skipped_noise=%s",
+            stats.total,
+            stats.accepted,
+            stats.preferred,
+            stats.fallback,
+            stats.skipped_status,
+            stats.skipped_time,
+            stats.skipped_country,
+            stats.skipped_noise,
+        )
+        return result, stats
 
     async def _load_existing_texts(self, date_key: str, provider_name: str) -> tuple[dict[str, str], dict[str, list[str]]] | None:
         async with SessionLocal() as session:
@@ -372,14 +398,9 @@ class DailyPipeline:
 
 
 def pick_start_sort_timestamp(pick: AiPick, ctx_by_id: dict[str, CandidateContext]) -> tuple[int, int]:
-    """Ключ сортировки финальных прогнозов для публикации.
-
-    Основной порядок: время начала матча по UTC timestamp.
-    Дополнительный порядок: AI score по убыванию, если время одинаковое/неизвестное.
-    """
+    """Ключ сортировки финальных прогнозов для публикации."""
     ctx = ctx_by_id.get(pick.fixture_id)
     ts = context_start_sort_timestamp(ctx)
-    # Чем выше ai_rank_score, тем раньше внутри одинакового времени.
     return ts, -int(getattr(pick, "ai_rank_score", 0) or 0)
 
 
@@ -391,7 +412,6 @@ def context_start_sort_timestamp(ctx: CandidateContext | None) -> int:
     if not raw:
         return 9999999999
 
-    # API-FOOTBALL обычно отдаёт ISO datetime, например 2026-05-04T19:00:00+03:00.
     try:
         dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
         if dt.tzinfo is None:
@@ -400,7 +420,6 @@ def context_start_sort_timestamp(ctx: CandidateContext | None) -> int:
     except Exception:
         pass
 
-    # LOCAL/резервные источники иногда отдают HH:MM. Это достаточно для сортировки внутри дня.
     match = re.search(r"(\d{1,2}):(\d{2})", raw)
     if match:
         hh = int(match.group(1))
@@ -411,11 +430,7 @@ def context_start_sort_timestamp(ctx: CandidateContext | None) -> int:
 
 
 def fixture_start_utc(fixture: object) -> datetime | None:
-    """Определить старт матча в UTC.
-
-    Для LOCAL date+time считаем UTC, потому что TheSportsDB/ESPN обычно
-    возвращают UTC-время, а рендер уже переводит его в Киев.
-    """
+    """Определить старт матча в UTC."""
     try:
         if isinstance(fixture, dict):
             timestamp = fixture.get("fixture", {}).get("timestamp")
@@ -444,7 +459,6 @@ def fixture_start_utc(fixture: object) -> datetime | None:
                     tzinfo=timezone.utc,
                 )
 
-            # Если времени нет, считаем старт концом дня UTC, чтобы матч не отсеять ошибочно утром.
             return datetime(
                 fixture_date.year,
                 fixture_date.month,
@@ -459,10 +473,10 @@ def fixture_start_utc(fixture: object) -> datetime | None:
     return None
 
 
-
 def fixture_sort_key(fixture: object) -> int:
     """Обратная совместимость со старым именем сортировки."""
     return fixture_sort_timestamp(fixture)
+
 
 def fixture_sort_timestamp(fixture: object) -> int:
     start = fixture_start_utc(fixture)
@@ -474,12 +488,14 @@ def fixture_sort_timestamp(fixture: object) -> int:
 
     return int(getattr(fixture, "timestamp", None) or 9999999999)
 
+
 def split_match_title(title: str) -> tuple[str, str]:
     if "—" in title:
         left, right = title.split("—", 1); return left.strip(), right.strip()
     if "-" in title:
         left, right = title.split("-", 1); return left.strip(), right.strip()
     return title, ""
+
 
 def safe_fixture_title(fixture: object) -> str:
     if hasattr(fixture, "home_team") and hasattr(fixture, "away_team"):
