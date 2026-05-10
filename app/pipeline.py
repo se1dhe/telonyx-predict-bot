@@ -16,11 +16,12 @@ from app.services.provider_factory import get_data_provider
 from app.services.rule_based_selector import RuleBasedSelector
 from app.services.render import render_daily_summary, render_pick_detail
 from app.services.draftkings_resolver import DraftKingsResolver
+from app.services.learning_calibrator import LearningCalibrator
 
 logger = logging.getLogger(__name__)
 
 class DailyPipeline:
-    """Джерело даних → фільтри → новини → AI → база."""
+    """Джерело даних → фільтри → новини → AI → самообучение → база."""
     def __init__(self) -> None:
         self.settings = get_settings()
         self.provider = get_data_provider()
@@ -28,6 +29,7 @@ class DailyPipeline:
         self.ai = AiSelector()
         self.rule_based = RuleBasedSelector()
         self.draftkings = DraftKingsResolver()
+        self.learning = LearningCalibrator()
 
     async def run_for_today(self, force: bool = False) -> tuple[dict[str, str], dict[str, list[str]]]:
         today = datetime.now(ZoneInfo(self.settings.tz)).date()
@@ -136,6 +138,18 @@ class DailyPipeline:
 
         picks = self._enrich_picks_with_context(ai_response.selected, contexts)
 
+        # v46: финальный safety/learning слой перед публикацией.
+        # AI/fallback может выбрать красивый, но исторически слабый рынок.
+        # Калибратор смотрит закрытые predictions и отсекает плохие паттерны.
+        try:
+            picks, learning_rejected = await self.learning.apply(picks, contexts)
+            if learning_rejected:
+                ai_response.rejected_summary.extend([f"Learning: {item}" for item in learning_rejected])
+                debug.append(f"🧬 Learning відсіяв: {len(learning_rejected)}")
+        except Exception as exc:
+            logger.exception("Learning calibrator failed, continue without calibration")
+            debug.append(f"⚠️ Learning calibrator error: <code>{escape(str(exc)[:500])}</code>")
+
         # v45: порядок публикации в Telegram должен быть хронологическим.
         # AI всё ещё выбирает лучшие матчи, но выводим их по времени старта:
         # сначала матч, который начнётся раньше.
@@ -146,9 +160,9 @@ class DailyPipeline:
         self._log_selected_picks(picks)
         debug.append(f"✅ Вибрано матчів: {len(picks)}")
         if not picks:
-            summary = "⚠️ AI не вибрав жодного матчу.\n\n<b>Діагностика:</b>\n" + "\n".join(debug)
+            summary = "⚠️ AI/learning не вибрав жодного достатньо сильного матчу.\n\n<b>Діагностика:</b>\n" + "\n".join(debug)
             if ai_response.rejected_summary:
-                summary += "\n\n<b>AI rejected:</b>\n" + "\n".join(f"• {escape(x)}" for x in ai_response.rejected_summary[:8])
+                summary += "\n\n<b>Rejected:</b>\n" + "\n".join(f"• {escape(x)}" for x in ai_response.rejected_summary[:8])
             await self._save_daily_run(date_key, summary, 0)
             return self._no_quality_matches_result()
         ctx_by_id = {ctx.fixture_id: ctx for ctx in contexts}
@@ -279,7 +293,6 @@ class DailyPipeline:
                 country = str(league.get("country", ""))
                 league_id = str(league.get("id", ""))
                 league_name = str(league.get("name", ""))
-                timestamp = fixture.get("fixture", {}).get("timestamp")
                 start_utc = fixture_start_utc(fixture)
             else:
                 status_value = getattr(fixture, "status", "")
@@ -287,7 +300,6 @@ class DailyPipeline:
                 country = str(getattr(fixture, "country", ""))
                 league_id = str(getattr(fixture, "league_id", ""))
                 league_name = str(getattr(fixture, "league_name", ""))
-                timestamp = getattr(fixture, "timestamp", None)
                 start_utc = fixture_start_utc(fixture)
 
             # Берём только запланированные матчи.
