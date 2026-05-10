@@ -68,13 +68,22 @@ class Settings(BaseSettings):
     log_ai_reasoning: bool = Field(True, alias="LOG_AI_REASONING")
     show_tech_diagnostics: bool = Field(False, alias="SHOW_TECH_DIAGNOSTICS")
     show_detailed_picks: bool = Field(True, alias="SHOW_DETAILED_PICKS")
+
+    # Bookmaker links.
+    # Старые DraftKings-переменные оставлены для совместимости, но новый resolver
+    # по умолчанию ищет точную страницу матча на Oddschecker и fallback-провайдерах.
     bookmaker_link_enabled: bool = Field(True, alias="BOOKMAKER_LINK_ENABLED")
-    bookmaker_name: str = Field("DraftKings", alias="BOOKMAKER_NAME")
+    bookmaker_name: str = Field("Oddschecker", alias="BOOKMAKER_NAME")
     bookmaker_search_url_template: str = Field("", alias="BOOKMAKER_SEARCH_URL_TEMPLATE")
     bookmaker_backup_links_enabled: bool = Field(False, alias="BOOKMAKER_BACKUP_LINKS_ENABLED")
     bookmaker_backup_links: str = Field("", alias="BOOKMAKER_BACKUP_LINKS")
-    bookmaker_market_hint: str = Field("Ищи рынок: Total Goals / Over-Under / Тотал голов", alias="BOOKMAKER_MARKET_HINT")
-    draftkings_resolver_enabled: bool = Field(True, alias="DRAFTKINGS_RESOLVER_ENABLED")
+    bookmaker_market_hint: str = Field("Шукай ринок: Total Goals / Over-Under / Тотал голов", alias="BOOKMAKER_MARKET_HINT")
+    bookmaker_resolver_provider: str = Field("oddschecker", alias="BOOKMAKER_RESOLVER_PROVIDER")
+    bookmaker_fallback_providers_raw: str = Field("ggbet,betking", alias="BOOKMAKER_FALLBACK_PROVIDERS")
+    bookmaker_require_exact_match: bool = Field(True, alias="BOOKMAKER_REQUIRE_EXACT_MATCH")
+    bookmaker_hide_if_not_found: bool = Field(True, alias="BOOKMAKER_HIDE_IF_NOT_FOUND")
+    bookmaker_resolver_max_results: int = Field(6, alias="BOOKMAKER_RESOLVER_MAX_RESULTS")
+    draftkings_resolver_enabled: bool = Field(False, alias="DRAFTKINGS_RESOLVER_ENABLED")
     draftkings_resolver_max_results: int = Field(5, alias="DRAFTKINGS_RESOLVER_MAX_RESULTS")
     serpapi_key: str | None = Field(None, alias="SERPAPI_KEY")
     database_url: str = Field("sqlite+aiosqlite:///./data/bot.db", alias="DATABASE_URL")
@@ -214,6 +223,11 @@ class Settings(BaseSettings):
     def safe_mode_allowed_bets(self) -> List[str]:
         """Разрешённые рынки для безопасного режима."""
         return [x.strip().upper() for x in self.safe_mode_allowed_bets_raw.split(",") if x.strip()]
+
+    @property
+    def bookmaker_fallback_providers(self) -> List[str]:
+        """Fallback-провайдеры для точной ссылки на матч."""
+        return [x.strip().lower() for x in self.bookmaker_fallback_providers_raw.split(",") if x.strip()]
 
     @property
     def thesportsdb_league_ids(self) -> List[str]:
