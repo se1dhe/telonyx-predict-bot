@@ -33,66 +33,163 @@ class ScopeStats:
 
 
 class LearningCalibrator:
-    """Самообучающийся калибратор прогнозов на базе закрытых ставок.
+    """Observe-only слой обучения + отдельная статическая защита safe-mode.
 
-    Он не делает вид, что у нас уже есть полноценная ML-модель. На старте это
-    безопасный online-learning слой: бот смотрит, какие рынки/лиги/страны уже
-    давали плюс или минус, и до публикации штрафует слабые исторические паттерны.
-    Чем больше закрытых прогнозов в PostgreSQL, тем сильнее становится фильтр.
+    Важно: пока обучаемая модель НЕ имеет права управлять публикацией.
+    Она только читает закрытые прогнозы, строит статистику и пишет выводы в Railway Logs.
+
+    За реальные прогнозы отвечают:
+    - AI / rule-based selector;
+    - статический safe-mode, который не зависит от истории winrate.
+
+    Такой режим нужен, чтобы модель спокойно набирала историю, но не могла:
+    - снижать confidence;
+    - повышать confidence;
+    - менять rank;
+    - выбрасывать матч из-за исторической статистики;
+    - брать весь отбор на себя.
     """
+
+    GOAL_MARKETS_TO_OVER_15 = {
+        "BTTS_YES",
+        "OVER_2_5",
+        "HOME_OR_DRAW_OVER_1_5",
+        "AWAY_OR_DRAW_OVER_1_5",
+    }
 
     def __init__(self) -> None:
         self.settings = get_settings()
 
     async def apply(self, picks: list[AiPick], contexts: list[CandidateContext]) -> tuple[list[AiPick], list[str]]:
-        """Вернуть откалиброванные прогнозы и причины отказов."""
-        if not self.settings.learning_enabled or not picks:
+        """Вернуть прогнозы после safe-mode, а learning оставить в режиме наблюдения."""
+        if not picks:
             return picks, []
 
+        if self.settings.learning_enabled:
+            await self._observe_history_only(picks, contexts)
+        else:
+            logger.info("Learning observer: disabled by LEARNING_ENABLED=false")
+
+        safe_picks, safe_rejected = self._apply_static_safety(picks)
+        return safe_picks[: self.settings.matches_per_day], safe_rejected[:10]
+
+    async def _observe_history_only(self, picks: list[AiPick], contexts: list[CandidateContext]) -> None:
+        """Прочитать историю и записать диагностическую статистику без влияния на picks."""
         history = await self._load_history()
         if not history:
-            logger.info("Learning calibrator: no finished predictions yet, skip calibration")
-            return self._apply_static_safety(picks, contexts), []
+            logger.info("Learning observer: no finished predictions yet; selection is not changed")
+            return
 
         stats = self._build_stats(history)
         ctx_by_id = {ctx.fixture_id: ctx for ctx in contexts}
-        calibrated: list[AiPick] = []
-        rejected: list[str] = []
+
+        logger.info(
+            "Learning observer: history=%s current_picks=%s mode=observe_only selection_changed=false",
+            len(history),
+            len(picks),
+        )
 
         for pick in picks:
             ctx = ctx_by_id.get(pick.fixture_id)
-            updated, reasons = self._calibrate_pick(pick, ctx, stats)
+            scopes = self._scopes_for(pick, ctx)
+            scope_notes = []
 
-            if updated is None:
-                rejected.append(f"{pick.match_title}: " + "; ".join(reasons))
+            for scope in scopes:
+                scope_stats = stats.get(scope)
+                if not scope_stats or scope_stats.total < self.settings.learning_min_sample_size:
+                    continue
+
+                scope_notes.append(
+                    f"{scope}=winrate:{int(scope_stats.winrate * 100)}%,sample:{scope_stats.total}"
+                )
+
+            if scope_notes:
+                logger.info(
+                    "Learning observer pick: %s | %s | no score/rank/filter changes applied",
+                    pick.match_title,
+                    "; ".join(scope_notes[:5]),
+                )
+
+    def _apply_static_safety(self, picks: list[AiPick]) -> tuple[list[AiPick], list[str]]:
+        """Применить safe-mode без участия обучающей статистики."""
+        if not self.settings.safe_mode_enabled:
+            return picks, []
+
+        allowed_bets = set(self.settings.safe_mode_allowed_bets)
+        result: list[AiPick] = []
+        rejected: list[str] = []
+
+        for pick in picks:
+            if self._is_high_risk_blocked(pick):
+                rejected.append(f"{pick.match_title}: Safe-mode відхилив високий ризик")
                 continue
 
-            calibrated.append(updated)
+            safe_pick, reason = self._normalize_bet_for_safe_mode(pick, allowed_bets)
+            if safe_pick is None:
+                rejected.append(
+                    f"{pick.match_title}: Safe-mode відхилив ринок {pick.main_bet_code}, дозволено тільки {', '.join(sorted(allowed_bets))}"
+                )
+                continue
 
-        calibrated.sort(key=lambda p: p.ai_rank_score, reverse=True)
-        result = calibrated[: self.settings.matches_per_day]
+            if reason:
+                logger.info("Safe-mode normalized pick: %s | %s", pick.match_title, reason)
+
+            result.append(safe_pick)
 
         logger.info(
-            "Learning calibrator: input=%s output=%s rejected=%s history=%s",
+            "Safe-mode: input=%s output=%s rejected=%s allowed=%s",
             len(picks),
             len(result),
             len(rejected),
-            len(history),
+            sorted(allowed_bets),
         )
-        for item in rejected[:10]:
-            logger.info("Learning calibrator rejected: %s", item)
+        return result, rejected
 
-        return result, rejected[:10]
+    def _is_high_risk_blocked(self, pick: AiPick) -> bool:
+        """Проверить запрет высокого риска."""
+        if self.settings.safe_mode_allow_high_risk:
+            return False
 
-    def _apply_static_safety(self, picks: list[AiPick], contexts: list[CandidateContext]) -> list[AiPick]:
-        """Даже без истории применить базовый безопасный режим."""
-        ctx_by_id = {ctx.fixture_id: ctx for ctx in contexts}
-        result: list[AiPick] = []
-        for pick in picks:
-            updated, _ = self._calibrate_pick(pick, ctx_by_id.get(pick.fixture_id), {})
-            if updated is not None:
-                result.append(updated)
-        return result
+        risk = str(pick.risk_level or "").lower().strip()
+        return risk in {"високий", "высокий", "high"}
+
+    def _normalize_bet_for_safe_mode(self, pick: AiPick, allowed_bets: set[str]) -> tuple[AiPick | None, str]:
+        """Жёстко привести ставку к разрешённым рынкам или отклонить.
+
+        Почему не просто штраф:
+        раньше BTTS_YES/OVER_2_5 могли пройти после штрафа, если confidence оставался
+        выше MIN_AI_CONFIDENCE. Теперь запрещённые рынки не публикуются как есть.
+        Для голевых рынков разрешён безопасный downgrade в OVER_1_5, если он включён
+        в SAFE_MODE_ALLOWED_BETS.
+        """
+        if pick.main_bet_code in allowed_bets:
+            return pick, ""
+
+        if "OVER_1_5" in allowed_bets and pick.main_bet_code in self.GOAL_MARKETS_TO_OVER_15:
+            warnings = list(pick.data_warnings or [])
+            warnings.append(f"Safe-mode замінив {pick.main_bet_code} на OVER_1_5")
+
+            penalty = max(0, int(self.settings.safe_mode_disallowed_bet_penalty or 0))
+            confidence = max(
+                int(self.settings.min_ai_confidence),
+                int(pick.confidence or 0) - penalty,
+            )
+            rank = max(1, int(pick.ai_rank_score or 0) - penalty)
+
+            return pick.model_copy(
+                update={
+                    "main_bet_code": "OVER_1_5",
+                    "main_bet_label": "Тотал більше 1.5 гола",
+                    "safe_bet_label": "Тотал більше 1.5 гола",
+                    "risky_bet_label": pick.main_bet_label,
+                    "risk_level": "низький" if str(pick.risk_level).lower().strip() in {"низький", "низкий", "low"} else "середній",
+                    "confidence": min(100, confidence),
+                    "ai_rank_score": min(100, rank),
+                    "data_warnings": warnings[:6],
+                }
+            ), f"{pick.main_bet_code} -> OVER_1_5"
+
+        return None, f"{pick.main_bet_code} is not allowed"
 
     async def _load_history(self) -> list[Prediction]:
         """Загрузить последние закрытые прогнозы из базы."""
@@ -129,78 +226,8 @@ class LearningCalibrator:
 
         return {key: ScopeStats(wins=value[0], losses=value[1]) for key, value in raw.items()}
 
-    def _calibrate_pick(
-        self,
-        pick: AiPick,
-        ctx: CandidateContext | None,
-        stats: dict[str, ScopeStats],
-    ) -> tuple[AiPick | None, list[str]]:
-        """Откалибровать один прогноз."""
-        allowed_bets = self.settings.safe_mode_allowed_bets
-        reasons: list[str] = []
-        confidence = int(pick.confidence or 0)
-        rank = int(pick.ai_rank_score or 0)
-        warnings = list(pick.data_warnings or [])
-
-        if self.settings.safe_mode_enabled:
-            if pick.main_bet_code not in allowed_bets:
-                penalty = self.settings.safe_mode_disallowed_bet_penalty
-                confidence -= penalty
-                rank -= penalty
-                reasons.append(f"рынок {pick.main_bet_code} не входит в safe-mode")
-
-            if not self.settings.safe_mode_allow_high_risk and str(pick.risk_level).lower().strip() == "високий":
-                return None, ["высокий риск запрещён safe-mode"]
-
-        if ctx is not None:
-            min_form = max(1, self.settings.learning_min_team_form_matches)
-            if ctx.home_metrics.matches < min_form or ctx.away_metrics.matches < min_form:
-                confidence -= 10
-                rank -= 10
-                reasons.append(f"мало формы: {ctx.home_metrics.matches}/{ctx.away_metrics.matches}")
-
-            if ctx.data_quality_score < self.settings.min_context_data_quality:
-                confidence -= 8
-                rank -= 8
-                reasons.append(f"data_quality={ctx.data_quality_score}")
-
-        scopes = self._scopes_for(pick, ctx)
-        for scope in scopes:
-            scope_stats = stats.get(scope)
-            if not scope_stats or scope_stats.total < self.settings.learning_min_sample_size:
-                continue
-
-            winrate_percent = int(scope_stats.winrate * 100)
-            threshold = self._threshold_for_scope(scope)
-
-            if winrate_percent < threshold:
-                penalty = self._penalty(threshold, winrate_percent)
-                confidence -= penalty
-                rank -= penalty
-                reasons.append(f"{scope} winrate={winrate_percent}% sample={scope_stats.total}")
-            elif winrate_percent >= threshold + 12:
-                bonus = min(self.settings.learning_max_bonus, int((winrate_percent - threshold) * self.settings.learning_bonus_strength))
-                confidence += bonus
-                rank += bonus
-
-        confidence = max(1, min(100, confidence))
-        rank = max(1, min(100, rank))
-
-        if confidence < self.settings.min_ai_confidence:
-            return None, reasons or [f"confidence после обучения {confidence} ниже порога"]
-
-        if reasons:
-            warnings.append("Калібратор знизив оцінку: " + "; ".join(reasons[:3]))
-
-        return pick.model_copy(
-            update={
-                "confidence": confidence,
-                "ai_rank_score": rank,
-                "data_warnings": warnings[:6],
-            }
-        ), reasons
-
     def _scopes_for(self, pick: AiPick, ctx: CandidateContext | None) -> list[str]:
+        """Список признаков, за которыми learning только наблюдает."""
         league = self._norm(ctx.league_name if ctx else "")
         country = self._norm(ctx.country if ctx else "")
         return [
@@ -210,19 +237,6 @@ class LearningCalibrator:
             f"bet_league:{pick.main_bet_code}:{league}",
             f"bet_country:{pick.main_bet_code}:{country}",
         ]
-
-    def _threshold_for_scope(self, scope: str) -> int:
-        if scope.startswith("bet:"):
-            return self.settings.learning_min_bet_winrate
-        if scope.startswith("league:"):
-            return self.settings.learning_min_league_winrate
-        if scope.startswith("country:"):
-            return self.settings.learning_min_country_winrate
-        return self.settings.learning_min_combo_winrate
-
-    def _penalty(self, threshold: int, actual: int) -> int:
-        gap = max(0, threshold - actual)
-        return min(self.settings.learning_max_penalty, max(4, int(gap * self.settings.learning_penalty_strength)))
 
     @staticmethod
     def _norm(value: str) -> str:
