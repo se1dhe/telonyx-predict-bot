@@ -19,7 +19,7 @@ from app.pipeline import DailyPipeline
 from app.scheduler import _get_lang_details, _get_lang_text, safe_send_html
 from app.services.channel_buttons import public_channel_cta_keyboard
 from app.services.channel_render import private_summary, public_summary_from_private
-from app.services.post_refs import PostRef, dumps_refs
+from app.services.post_refs import PostRef, dumps_refs, loads_refs
 
 
 logger = logging.getLogger(__name__)
@@ -32,6 +32,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--tomorrow", action="store_true", help="Use tomorrow's date in configured timezone")
     parser.add_argument("--clear", action="store_true", help="Delete existing daily run and predictions first")
     parser.add_argument("--no-send", action="store_true", help="Build and save, but do not send Telegram messages")
+    parser.add_argument("--edit-existing", action="store_true", help="Edit existing Telegram prediction posts after build")
     return parser.parse_args()
 
 
@@ -102,7 +103,58 @@ async def save_message_refs(
         logger.info("Saved refs date=%s predictions=%s expected=%s", date_key, len(rows[:expected_count]), expected_count)
 
 
-async def publish_date(bot: Bot, target_date: date, clear: bool, send: bool) -> None:
+async def edit_existing_posts(bot: Bot, date_key: str, provider: str) -> int:
+    async with SessionLocal() as session:
+        rows = (await session.execute(
+            select(Prediction)
+            .where(Prediction.date_key == date_key)
+            .where(Prediction.provider == provider)
+            .where(Prediction.rendered_text != "")
+            .order_by(Prediction.start_time.asc(), Prediction.ai_rank_score.desc())
+        )).scalars().all()
+
+    updated = 0
+    for index, prediction in enumerate(rows):
+        private_refs = []
+        public_refs = []
+        try:
+            private_refs = loads_refs(prediction.private_message_refs)
+            public_refs = loads_refs(prediction.public_message_refs)
+        except Exception:
+            logger.exception("Failed to parse refs for prediction=%s", prediction.id)
+
+        for ref in private_refs:
+            try:
+                await bot.edit_message_text(
+                    chat_id=ref.chat_id,
+                    message_id=ref.message_id,
+                    text=prediction.rendered_text[:3850] + "\n\n..." if len(prediction.rendered_text) > 3900 else prediction.rendered_text,
+                    parse_mode=ParseMode.HTML,
+                    disable_web_page_preview=True,
+                )
+                updated += 1
+            except Exception as exc:
+                logger.warning("Failed to edit private post prediction=%s: %s", prediction.id, exc)
+
+        for ref in public_refs:
+            try:
+                await bot.edit_message_text(
+                    chat_id=ref.chat_id,
+                    message_id=ref.message_id,
+                    text=public_summary_from_private("", prediction.rendered_text[:3400], lang=ref.lang),
+                    parse_mode=ParseMode.HTML,
+                    disable_web_page_preview=True,
+                    reply_markup=public_channel_cta_keyboard(ref.lang) if index == 0 else None,
+                )
+                updated += 1
+            except Exception as exc:
+                logger.warning("Failed to edit public post prediction=%s: %s", prediction.id, exc)
+
+    logger.info("Edited existing posts date=%s messages=%s", date_key, updated)
+    return updated
+
+
+async def publish_date(bot: Bot, target_date: date, clear: bool, send: bool, edit_existing: bool) -> None:
     settings = get_settings()
     provider = "API_FOOTBALL" if settings.odds_first_enabled else settings.provider_normalized
     date_key = target_date.isoformat()
@@ -115,6 +167,8 @@ async def publish_date(bot: Bot, target_date: date, clear: bool, send: bool) -> 
     logger.info("Built date=%s details=%s send=%s", date_key, total_details, send)
 
     if not send:
+        if edit_existing:
+            await edit_existing_posts(bot, date_key, provider)
         return
 
     private_refs_by_index: dict[int, list[PostRef]] = {}
@@ -170,7 +224,7 @@ async def main() -> None:
     )
     try:
         for target_date in requested_dates(args):
-            await publish_date(bot, target_date, clear=args.clear, send=not args.no_send)
+            await publish_date(bot, target_date, clear=args.clear, send=not args.no_send, edit_existing=args.edit_existing)
     finally:
         await bot.session.close()
 
