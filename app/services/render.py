@@ -303,8 +303,7 @@ def bookmaker_link_line(match_title: str, bookmaker_url: str = "", lang: str = "
 
 
 def bookmaker_odds_line(p: AiPick, lang: str) -> str:
-    name = p.bookmaker_name or get_settings().bookmaker_name or ""
-    if not name and not p.bookmaker_odds:
+    if not p.bookmaker_odds:
         return ""
     odds = f"{float(p.bookmaker_odds):.2f}" if p.bookmaker_odds else "—"
     return f"{L(lang, 'bookmaker_odds')} {html_escape(odds)}"

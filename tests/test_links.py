@@ -4,7 +4,7 @@ from types import SimpleNamespace
 from app.pipeline import build_ggbet_match_url, find_pick_market_odds
 from app.pipeline import DailyPipeline
 from app.schemas import RawFixture
-from app.services.bookmaker_resolver import ggbet_slug_candidates
+from app.services.bookmaker_resolver import ggbet_market_matches_bet, ggbet_odd_matches_bet, ggbet_slug_candidates
 from app.schemas import AiPick, CandidateContext, TeamMetrics
 from app.services.render import render_daily_summary, render_pick_detail
 
@@ -52,6 +52,18 @@ def test_ggbet_generated_fallback_candidates_use_en_slug_rules() -> None:
         "2026-05-27T18:00:00+00:00",
         "Europe/Kiev",
     )[0] == "sparta-nijkerk-vs-vv-ijsselmeervogels-27-05"
+
+
+def test_ggbet_total_over_15_market_mapping() -> None:
+    market = {
+        "id": "398t1_5",
+        "name": "Total",
+        "typeId": 398,
+        "odds": [{"name": "over 1.5", "value": "1.44"}],
+    }
+
+    assert ggbet_market_matches_bet(market, "OVER_1_5")
+    assert ggbet_odd_matches_bet(market["odds"][0], "OVER_1_5")
 
 
 def test_raw_fixture_filter_keeps_only_target_kyiv_date() -> None:
@@ -152,6 +164,33 @@ def test_render_hides_ggbet_link_when_pick_url_is_empty() -> None:
     text = render_daily_summary([pick], [], contexts_by_id={"1": ctx}, lang="uk")
 
     assert "ggbet.ua" not in text
+
+
+def test_render_hides_missing_bookmaker_odds() -> None:
+    pick = AiPick(
+        fixture_id="1",
+        match_title="Vvsb — Excelsior Maassluis",
+        ai_rank_score=80,
+        predicted_winner="ринок безпечніший",
+        who_should_score="через тотал",
+        main_bet_code="OVER_1_5",
+        main_bet_label="Over 1.5",
+        safe_bet_label="Over 1.5",
+        risky_bet_label="Over 2.5",
+        risk_level="низький",
+        confidence=70,
+        why_this_match_is_gold="ok",
+        reasoning="ok",
+        tracking_url="",
+        bookmaker_url="https://ggbet.ua/en/sports/match/vvsb-vs-excelsior-maassluis-27-05",
+        bookmaker_name="GGBET",
+        bookmaker_odds=None,
+    )
+
+    text = render_daily_summary([pick], [], lang="uk")
+
+    assert "Кеф / лінія" not in text
+    assert "ggbet.ua/en/sports/match" in text
 
 
 def test_find_pick_market_odds_uses_exact_over_15_and_best_price() -> None:

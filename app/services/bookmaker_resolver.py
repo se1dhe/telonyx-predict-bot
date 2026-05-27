@@ -134,6 +134,16 @@ class BookmakerResolver:
         self._cache[cache_key] = result
         return result
 
+    async def ggbet_market_odds(self, bookmaker_url: str, bet_code: str) -> float | None:
+        """Вернуть коэффициент GGBET для конкретного рынка по URL матча."""
+        if not bookmaker_url:
+            return None
+        parsed = urlparse(bookmaker_url)
+        slug = parsed.path.rstrip("/").split("/")[-1]
+        if not slug:
+            return None
+        return await self._ggbet.market_odds_by_slug(slug, bet_code)
+
     def _provider_order(self) -> list[str]:
         """Собрать порядок провайдеров: primary + fallback без дублей."""
         result: list[str] = []
@@ -387,6 +397,53 @@ class GGBetResolver:
         match = data.get("data", {}).get("match") if data else None
         return bool(match and match.get("slug") == slug and match.get("id"))
 
+    async def market_odds_by_slug(self, slug: str, bet_code: str) -> float | None:
+        bootstrap = await self._load_bootstrap()
+        if not bootstrap:
+            return None
+
+        event_id = await self._event_id_by_slug(bootstrap, slug)
+        if not event_id:
+            return None
+        return await self._market_odds_by_event_id(bootstrap, event_id, bet_code)
+
+    async def _event_id_by_slug(self, bootstrap: dict[str, str], slug: str) -> str:
+        query = """
+        query GetMatchBySlug($slug:String!) {
+          match: sportEventBySlug(slug:$slug) { id slug __typename }
+        }
+        """
+        data = await self._graphql(bootstrap, query, {"slug": slug})
+        match = data.get("data", {}).get("match") if data else None
+        return str(match.get("id") or "") if match else ""
+
+    async def _market_odds_by_event_id(self, bootstrap: dict[str, str], event_id: str, bet_code: str) -> float | None:
+        query = """
+        query Markets($ids:[String!]!) {
+          sportEventsByIds(sportEventsIds:$ids) {
+            id
+            markets {
+              id
+              name
+              typeId
+              odds { id name value }
+            }
+          }
+        }
+        """
+        data = await self._graphql(bootstrap, query, {"ids": [event_id]})
+        events = data.get("data", {}).get("sportEventsByIds", []) if data else []
+        if not events:
+            return None
+
+        for market in events[0].get("markets", []) or []:
+            if not ggbet_market_matches_bet(market, bet_code):
+                continue
+            for odd in market.get("odds", []) or []:
+                if ggbet_odd_matches_bet(odd, bet_code):
+                    return parse_float_odd(odd.get("value"))
+        return None
+
     def _url_for_slug(self, slug: str) -> str:
         locale = normalize_ggbet_locale(getattr(self.settings, "ggbet_locale", "en"))
         return f"https://ggbet.ua/{locale}/sports/match/{slug}"
@@ -529,6 +586,33 @@ def slugify_ggbet_team(value: str) -> str:
 def ggbet_slug_matches(slug: str, home_team: str, away_team: str) -> bool:
     haystack = normalize_text(slug.replace("-", " "))
     return teams_match(haystack, normalize_text(home_team), normalize_text(away_team))
+
+
+def ggbet_market_matches_bet(market: dict[str, Any], bet_code: str) -> bool:
+    name = normalize_text(str(market.get("name") or ""))
+    market_id = str(market.get("id") or "").lower()
+    type_id = str(market.get("typeId") or "")
+    if bet_code in {"OVER_1_5", "OVER_2_5"}:
+        target = "1_5" if bet_code == "OVER_1_5" else "2_5"
+        return name == "total" and type_id == "398" and market_id.endswith(target)
+    return False
+
+
+def ggbet_odd_matches_bet(odd: dict[str, Any], bet_code: str) -> bool:
+    name = normalize_text(str(odd.get("name") or ""))
+    if bet_code == "OVER_1_5":
+        return name == "over 1 5"
+    if bet_code == "OVER_2_5":
+        return name == "over 2 5"
+    return False
+
+
+def parse_float_odd(raw: object) -> float | None:
+    try:
+        value = float(str(raw or "").strip().replace(",", "."))
+    except ValueError:
+        return None
+    return value if value > 1 else None
 
 
 def unique_items(items: list[str]) -> list[str]:

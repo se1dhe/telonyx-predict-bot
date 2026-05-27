@@ -316,6 +316,14 @@ class DailyPipeline:
             if provider_name:
                 setattr(pick, "bookmaker_name", provider_name)
 
+            if provider_name.lower() == "ggbet" and url:
+                ggbet_odds = await self.bookmaker.ggbet_market_odds(url, pick.main_bet_code)
+                pick.bookmaker_odds = ggbet_odds
+                if ggbet_odds:
+                    logger.info("GGBET odds set for %s %s: %.2f", pick.match_title, pick.main_bet_code, ggbet_odds)
+                else:
+                    logger.info("GGBET odds not found for %s %s; API-Football odds hidden", pick.match_title, pick.main_bet_code)
+
             if url:
                 logger.info("Bookmaker exact URL set for %s: %s", pick.match_title, url)
             else:
