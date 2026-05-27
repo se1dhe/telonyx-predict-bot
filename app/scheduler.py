@@ -95,9 +95,13 @@ async def send_daily_gold_matches(bot: Bot) -> None:
 
     try:
         async with pipeline_lock:
+            if await already_published_today():
+                logger.info("Daily predictions already published today; startup/retry launch skipped")
+                return
+
             logger.info("Запускаю ежедневный сбор прогнозов")
             summaries, details_by_lang = await asyncio.wait_for(
-                DailyPipeline().run_for_today(force=True),
+                DailyPipeline().run_for_today(force=False),
                 timeout=settings.pipeline_timeout_seconds,
             )
 
@@ -172,6 +176,26 @@ async def send_daily_gold_matches(bot: Bot) -> None:
             bot,
             "⚠️ Error while collecting predictions.\n\nDetails are written to Railway Logs.",
         )
+
+
+async def already_published_today() -> bool:
+    """Не публиковать повторный daily-run после redeploy, если карточки уже ушли."""
+    settings = get_settings()
+    provider = "API_FOOTBALL" if settings.odds_first_enabled else settings.provider_normalized
+    date_key = datetime.now(ZoneInfo(settings.tz)).date().isoformat()
+
+    async with SessionLocal() as session:
+        rows = (await session.execute(
+            select(Prediction)
+            .where(Prediction.provider == provider)
+            .where(Prediction.date_key == date_key)
+            .where(Prediction.rendered_text != "")
+        )).scalars().all()
+
+    for row in rows:
+        if str(row.private_message_refs or "").strip() or str(row.public_message_refs or "").strip():
+            return True
+    return False
 
 
 async def save_sent_message_refs(
