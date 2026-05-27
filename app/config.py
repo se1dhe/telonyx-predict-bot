@@ -114,6 +114,7 @@ class Settings(BaseSettings):
     min_pick_odds_require_available: bool = Field(True, alias="MIN_PICK_ODDS_REQUIRE_AVAILABLE")
     odds_first_enabled: bool = Field(True, alias="ODDS_FIRST_ENABLED")
     odds_first_bookmaker_id: str = Field("", alias="ODDS_FIRST_BOOKMAKER_ID")
+    odds_first_bookmaker_ids_raw: str = Field("", alias="ODDS_FIRST_BOOKMAKER_IDS")
     odds_first_bet_ids_raw: str = Field("5", alias="ODDS_FIRST_BET_IDS")
     ggbet_odds_first_enabled: bool = Field(False, alias="GGBET_ODDS_FIRST_ENABLED")
     ggbet_football_url: str = Field("https://ggbet.ua/en/bets?sportId=football", alias="GGBET_FOOTBALL_URL")
@@ -251,6 +252,12 @@ class Settings(BaseSettings):
     def odds_first_bet_ids(self) -> List[str]:
         """ID рынков API-Football для первичного odds-запроса."""
         return [x.strip() for x in self.odds_first_bet_ids_raw.split(",") if x.strip()]
+
+    @property
+    def odds_first_bookmaker_ids(self) -> List[str]:
+        """Whitelist букмекеров API-Football для odds-first отбора."""
+        raw = self.odds_first_bookmaker_ids_raw.strip() or self.odds_first_bookmaker_id.strip()
+        return [x.strip() for x in raw.split(",") if x.strip()]
 
     @property
     def bookmaker_fallback_providers(self) -> List[str]:

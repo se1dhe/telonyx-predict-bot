@@ -366,7 +366,8 @@ class DailyPipeline:
 
         for pick in picks:
             ctx = ctx_by_id.get(pick.fixture_id)
-            odds = find_pick_market_odds(pick, ctx)
+            offer = find_pick_market_offer(pick, ctx)
+            odds = offer["odd"] if offer else None
 
             if odds is None:
                 if require_available:
@@ -384,7 +385,7 @@ class DailyPipeline:
             result.append(
                 pick.model_copy(
                     update={
-                        "bookmaker_name": self.settings.bookmaker_name,
+                        "bookmaker_name": str(offer.get("bookmaker") or self.settings.bookmaker_name) if offer else self.settings.bookmaker_name,
                         "bookmaker_odds": odds,
                         "data_warnings": warnings[:6],
                     }
@@ -612,10 +613,16 @@ def fixture_sort_timestamp(fixture: object) -> int:
 
 def find_pick_market_odds(pick: AiPick, ctx: CandidateContext | None) -> float | None:
     """Найти коэффициент именно для выбранного рынка, если источник его дал."""
+    offer = find_pick_market_offer(pick, ctx)
+    return float(offer["odd"]) if offer else None
+
+
+def find_pick_market_offer(pick: AiPick, ctx: CandidateContext | None) -> dict[str, object] | None:
+    """Найти лучшую букмекерскую линию именно для выбранного рынка."""
     if not ctx or not ctx.odds:
         return None
 
-    best_odd: float | None = None
+    best_offer: dict[str, object] | None = None
     for offer in ctx.odds:
         if not isinstance(offer, dict):
             continue
@@ -633,10 +640,16 @@ def find_pick_market_odds(pick: AiPick, ctx: CandidateContext | None) -> float |
             if odd is None:
                 continue
             if odds_value_matches_pick(pick, ctx, market, label):
-                if best_odd is None or odd > best_odd:
-                    best_odd = odd
+                if best_offer is None or odd > float(best_offer["odd"]):
+                    best_offer = {
+                        "bookmaker_id": offer.get("bookmaker_id"),
+                        "bookmaker": offer.get("bookmaker"),
+                        "market": offer.get("market"),
+                        "value": value.get("value") or value.get("name") or value.get("label"),
+                        "odd": odd,
+                    }
 
-    return best_odd
+    return best_offer
 
 
 def odds_value_matches_pick(pick: AiPick, ctx: CandidateContext, market: str, label: str) -> bool:
@@ -647,9 +660,9 @@ def odds_value_matches_pick(pick: AiPick, ctx: CandidateContext, market: str, la
     away = ctx.away_team.lower()
 
     if code == "OVER_1_5":
-        return "over" in text and ("1.5" in text or "1,5" in text)
+        return "over" in label and ("1.5" in label or "1,5" in label)
     if code == "OVER_2_5":
-        return "over" in text and ("2.5" in text or "2,5" in text)
+        return "over" in label and ("2.5" in label or "2,5" in label)
     if code == "BTTS_YES":
         return ("both teams" in market or "btts" in market) and label in {"yes", "так"}
     if code == "HOME_DOUBLE_CHANCE":

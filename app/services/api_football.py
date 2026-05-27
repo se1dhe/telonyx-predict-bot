@@ -143,9 +143,15 @@ class ApiFootballClient:
         rows = await self.odds_by_date(target_date)
         fixtures: list[RawFixture] = []
         seen: set[str] = set()
+        bookmaker_ids = self.settings.odds_first_bookmaker_ids
 
         for row in rows:
-            if not odds_row_has_min_allowed_market(row, self.settings.min_pick_odds, set(self.settings.safe_mode_allowed_bets)):
+            if not odds_row_has_min_allowed_market(
+                row,
+                self.settings.min_pick_odds,
+                set(self.settings.safe_mode_allowed_bets),
+                bookmaker_ids,
+            ):
                 continue
 
             fixture_obj = row.get("fixture", {}) or {}
@@ -187,7 +193,7 @@ class ApiFootballClient:
                     away_team=away_name,
                     provider="API_FOOTBALL",
                     source_league_code=str(league.get("id") or ""),
-                    prematch_odds=simplify_odds([row]),
+                    prematch_odds=simplify_odds([row], bookmaker_ids=bookmaker_ids),
                 )
             )
             if len(fixtures) >= max(1, self.settings.max_raw_events):
@@ -201,7 +207,7 @@ class ApiFootballClient:
         params: dict[str, Any] = {
             "date": target_date.isoformat(),
         }
-        if self.settings.odds_first_bookmaker_id.strip():
+        if self.settings.odds_first_bookmaker_id.strip() and not self.settings.odds_first_bookmaker_ids:
             params["bookmaker"] = self.settings.odds_first_bookmaker_id.strip()
 
         bet_ids = self.settings.odds_first_bet_ids
@@ -535,21 +541,26 @@ def compact_injuries(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return result
 
 
-def simplify_odds(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def simplify_odds(rows: list[dict[str, Any]], bookmaker_ids: list[str] | None = None) -> list[dict[str, Any]]:
     """Сжать коэффициенты.
 
     Оставляем только рынки, которые похожи на тоталы/исходы.
     """
     result = []
+    allowed_bookmakers = {str(item).strip() for item in (bookmaker_ids or []) if str(item).strip()}
 
     for item in rows[:2]:
         bookmakers = item.get("bookmakers", [])
-        for bookmaker in bookmakers[:2]:
+        for bookmaker in bookmakers:
+            bookmaker_id = str(bookmaker.get("id") or "")
+            if allowed_bookmakers and bookmaker_id not in allowed_bookmakers:
+                continue
             for bet in bookmaker.get("bets", [])[:10]:
                 name = str(bet.get("name", ""))
                 if any(word in name.lower() for word in ["goals", "total", "over", "under", "match winner", "double chance"]):
                     result.append(
                         {
+                            "bookmaker_id": bookmaker.get("id"),
                             "bookmaker": bookmaker.get("name"),
                             "market": name,
                             "values": bet.get("values", [])[:8],
@@ -559,9 +570,18 @@ def simplify_odds(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return result[:10]
 
 
-def odds_row_has_min_allowed_market(row: dict[str, Any], min_odds: float, allowed_bets: set[str]) -> bool:
+def odds_row_has_min_allowed_market(
+    row: dict[str, Any],
+    min_odds: float,
+    allowed_bets: set[str],
+    bookmaker_ids: list[str] | None = None,
+) -> bool:
     """Проверить, что в строке odds есть разрешённый рынок с нужным коэффициентом."""
+    allowed_bookmakers = {str(item).strip() for item in (bookmaker_ids or []) if str(item).strip()}
     for bookmaker in row.get("bookmakers", []) or []:
+        bookmaker_id = str(bookmaker.get("id") or "")
+        if allowed_bookmakers and bookmaker_id not in allowed_bookmakers:
+            continue
         for bet in bookmaker.get("bets", []) or []:
             market = str(bet.get("name") or "")
             for value in bet.get("values", []) or []:
@@ -582,9 +602,9 @@ def bet_value_to_code(market: str, value: str) -> str:
     value_l = str(value or "").lower()
     text = f"{market_l} {value_l}"
 
-    if "over" in text and ("1.5" in text or "1,5" in text):
+    if "over" in value_l and ("1.5" in value_l or "1,5" in value_l):
         return "OVER_1_5"
-    if "over" in text and ("2.5" in text or "2,5" in text):
+    if "over" in value_l and ("2.5" in value_l or "2,5" in value_l):
         return "OVER_2_5"
     if ("both teams" in market_l or "btts" in market_l) and value_l in {"yes", "так"}:
         return "BTTS_YES"

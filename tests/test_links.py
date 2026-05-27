@@ -1,10 +1,10 @@
 from datetime import date
 from types import SimpleNamespace
 
-from app.pipeline import build_ggbet_match_url, find_pick_market_odds
+from app.pipeline import build_ggbet_match_url, find_pick_market_odds, find_pick_market_offer
 from app.pipeline import DailyPipeline
 from app.schemas import RawFixture
-from app.services.api_football import match_ggbet_event_to_fixture
+from app.services.api_football import odds_row_has_min_allowed_market, match_ggbet_event_to_fixture, simplify_odds
 from app.services.bookmaker_resolver import GGBetResolver, ggbet_market_matches_bet, ggbet_odd_matches_bet, ggbet_slug_candidates
 from app.services.ggbet_scraper import GGBetEvent, ggbet_event_to_odds, parse_match_page
 from app.schemas import AiPick, CandidateContext, TeamMetrics
@@ -311,9 +311,47 @@ def test_find_pick_market_odds_uses_exact_over_15_and_best_price() -> None:
             {
                 "bookmaker": "B",
                 "market": "Goals Over/Under",
-                "values": [{"value": "Over 1.5", "odd": "1.42"}],
+                "values": [{"value": "Under 1.5", "odd": "3.20"}, {"value": "Over 1.5", "odd": "1.42"}],
             },
         ],
     )
 
     assert find_pick_market_odds(pick, ctx) == 1.42
+    assert find_pick_market_offer(pick, ctx) == {
+        "bookmaker_id": None,
+        "bookmaker": "B",
+        "market": "Goals Over/Under",
+        "value": "Over 1.5",
+        "odd": 1.42,
+    }
+
+
+def test_api_football_odds_whitelist_filters_bookmakers() -> None:
+    row = {
+        "bookmakers": [
+            {
+                "id": 16,
+                "name": "Unibet",
+                "bets": [{"id": 5, "name": "Goals Over/Under", "values": [{"value": "Over 1.5", "odd": "1.55"}]}],
+            },
+            {
+                "id": 32,
+                "name": "Betano",
+                "bets": [{"id": 5, "name": "Goals Over/Under", "values": [{"value": "Over 1.5", "odd": "1.42"}]}],
+            },
+        ]
+    }
+
+    assert odds_row_has_min_allowed_market(row, 1.3, {"OVER_1_5"}, ["32"])
+    assert not odds_row_has_min_allowed_market(row, 1.5, {"OVER_1_5"}, ["32"])
+    row["bookmakers"][1]["bets"][0]["values"] = [{"value": "Under 1.5", "odd": "1.80"}]
+    assert not odds_row_has_min_allowed_market(row, 1.3, {"OVER_1_5"}, ["32"])
+    row["bookmakers"][1]["bets"][0]["values"] = [{"value": "Over 1.5", "odd": "1.42"}]
+    assert simplify_odds([row], bookmaker_ids=["32"]) == [
+        {
+            "bookmaker_id": 32,
+            "bookmaker": "Betano",
+            "market": "Goals Over/Under",
+            "values": [{"value": "Over 1.5", "odd": "1.42"}],
+        }
+    ]
