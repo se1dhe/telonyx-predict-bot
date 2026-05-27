@@ -94,6 +94,8 @@ class GGBetScraper:
                     if link_matches_target_date(link, target_date, target_tz)
                 ][:max_links]
                 logger.info("GGBET scraper: match links target_date=%s count=%s", target_date, len(filtered_links))
+                if not filtered_links:
+                    log_empty_links_diagnostics(page)
 
                 for index, link in enumerate(filtered_links, start=1):
                     match_url = link if link.startswith("http") else f"{base_url}{link}"
@@ -125,6 +127,31 @@ class GGBetScraper:
         events.sort(key=lambda event: event.start_time or datetime.max.replace(tzinfo=target_tz))
         logger.info("GGBET scraper: accepted events=%s target_date=%s min_odds=%.2f", len(events), target_date, min_odds)
         return events
+
+
+def log_empty_links_diagnostics(page: object) -> None:
+    try:
+        current_url = page.url
+        title = page.title()
+        anchor_sample = page.evaluate(
+            """
+            () => Array.from(document.querySelectorAll('a'))
+              .slice(0, 20)
+              .map(a => a.getAttribute('href') || a.textContent || '')
+              .filter(Boolean)
+            """
+        )
+        body_text = page.locator("body").inner_text(timeout=5000)
+        preview = re.sub(r"\s+", " ", str(body_text or ""))[:700]
+        logger.warning(
+            "GGBET scraper: no match links diagnostics url=%s title=%r anchors=%s body=%r",
+            current_url,
+            title,
+            anchor_sample,
+            preview,
+        )
+    except Exception as exc:
+        logger.warning("GGBET scraper: failed no-link diagnostics: %s", exc)
 
 
 def parse_match_page(url: str, text: str, tz: ZoneInfo) -> GGBetEvent | None:
