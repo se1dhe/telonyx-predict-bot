@@ -287,13 +287,16 @@ def confidence_text(confidence: int, lang: str) -> str:
     return "низька"
 
 
-def bookmaker_link_line(match_title: str, bookmaker_url: str = "", lang: str = "uk", bookmaker_name: str = "", odds: float | None = None) -> str:
+def bookmaker_link_line(match_title: str, bookmaker_url: str = "", lang: str = "uk", bookmaker_name: str = "", odds: float | None = None, match_time: str = "") -> str:
     settings = get_settings()
     if not settings.bookmaker_link_enabled:
         return ""
 
     name = bookmaker_name or settings.bookmaker_name or "bookmaker"
     url = str(bookmaker_url or "").strip()
+
+    if not url and (name or "").strip().lower() == "ggbet":
+        url = build_ggbet_match_url_from_title(match_title, match_time)
 
     if not url:
         return ""
@@ -308,6 +311,50 @@ def bookmaker_odds_line(p: AiPick, lang: str) -> str:
         return ""
     odds = f"{float(p.bookmaker_odds):.2f}" if p.bookmaker_odds else "—"
     return f"{L(lang, 'bookmaker_odds')} {html_escape(odds)}"
+
+
+def build_ggbet_match_url_from_title(match_title: str, match_time: str = "") -> str:
+    home, away = split_match_title(match_title)
+    if not home or not away:
+        return ""
+
+    slug = f"{slugify_url_part(home)}-vs-{slugify_url_part(away)}"
+    parsed = parse_match_datetime(match_time)
+    if parsed:
+        slug = f"{slug}-{parsed.strftime('%d-%m')}"
+    return f"https://ggbet.ua/uk-ua/sports/match/{slug}"
+
+
+def split_match_title(match_title: str) -> tuple[str, str]:
+    if "—" in match_title:
+        home, away = match_title.split("—", 1)
+        return home.strip(), away.strip()
+    if " vs " in match_title.lower():
+        parts = re.split(r"\s+vs\s+", match_title, flags=re.IGNORECASE)
+        if len(parts) >= 2:
+            return parts[0].strip(), parts[1].strip()
+    return match_title.strip(), ""
+
+
+def slugify_url_part(value: str) -> str:
+    text = str(value or "").lower().strip()
+    text = text.encode("ascii", "ignore").decode("ascii")
+    text = text.replace("&", " and ")
+    text = re.sub(r"\b(fc|cf|sc|afc|ac|club|football|soccer)\b", " ", text)
+    text = re.sub(r"[^a-z0-9]+", "-", text)
+    return re.sub(r"-+", "-", text).strip("-") or "team"
+
+
+def parse_match_datetime(value: str) -> datetime | None:
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    try:
+        if " " in raw and "T" not in raw:
+            return datetime.fromisoformat(raw.replace(" ", "T"))
+        return datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except Exception:
+        return None
 
 
 def generated_why(p: AiPick, ctx: CandidateContext | None, lang: str) -> str:
@@ -368,7 +415,15 @@ def render_daily_summary(
         if odds_line:
             lines.append(odds_line)
 
-        line = bookmaker_link_line(p.match_title, p.bookmaker_url, lang, p.bookmaker_name, p.bookmaker_odds)
+        ctx = contexts_by_id.get(p.fixture_id) if contexts_by_id else None
+        line = bookmaker_link_line(
+            p.match_title,
+            p.bookmaker_url,
+            lang,
+            p.bookmaker_name,
+            p.bookmaker_odds,
+            ctx.start_time if ctx else "",
+        )
         if line:
             lines.append(line)
 
@@ -420,7 +475,14 @@ def render_pick_detail(p: AiPick, ctx: CandidateContext | None = None, lang: str
         f"{L(lang, 'analysis')}\n{html_escape(generated_analysis(p, ctx, lang))}{data_block}",
     ]
 
-    line = bookmaker_link_line(p.match_title, p.bookmaker_url, lang, p.bookmaker_name, p.bookmaker_odds)
+    line = bookmaker_link_line(
+        p.match_title,
+        p.bookmaker_url,
+        lang,
+        p.bookmaker_name,
+        p.bookmaker_odds,
+        ctx.start_time if ctx else "",
+    )
     if line:
         lines.append("")
         lines.append(line)

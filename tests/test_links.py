@@ -1,5 +1,5 @@
 from app.pipeline import build_ggbet_match_url
-from app.schemas import AiPick
+from app.schemas import AiPick, CandidateContext, TeamMetrics
 from app.services.render import render_daily_summary, render_pick_detail
 
 
@@ -40,3 +40,41 @@ def test_render_uses_exact_ggbet_link_and_hides_sofascore() -> None:
     assert "https://ggbet.ua/uk-ua/sports/match/vvsb-vs-excelsior-maassluis-27-05" in text
     assert "https://ggbet.ua/uk/sports" not in text
     assert "sofascore.com" not in text.lower()
+
+
+def test_render_builds_ggbet_link_when_pick_url_is_empty() -> None:
+    pick = AiPick(
+        fixture_id="1",
+        match_title="Vvsb — Excelsior Maassluis",
+        ai_rank_score=80,
+        predicted_winner="ринок безпечніший",
+        who_should_score="через тотал",
+        main_bet_code="OVER_1_5",
+        main_bet_label="Over 1.5",
+        safe_bet_label="Over 1.5",
+        risky_bet_label="Over 2.5",
+        risk_level="низький",
+        confidence=70,
+        why_this_match_is_gold="ok",
+        reasoning="ok",
+        tracking_url="",
+        bookmaker_url="",
+        bookmaker_name="GGBET",
+        bookmaker_odds=1.45,
+    )
+    ctx = CandidateContext(
+        fixture_id="1",
+        start_time="2026-05-27T17:00:00+00:00",
+        home_team="Vvsb",
+        away_team="Excelsior Maassluis",
+        home_team_id="vvsb",
+        away_team_id="excelsior-maassluis",
+        league_name="Test League",
+        country="Netherlands",
+        home_metrics=TeamMetrics(matches=1),
+        away_metrics=TeamMetrics(matches=1),
+    )
+
+    text = render_daily_summary([pick], [], contexts_by_id={"1": ctx}, lang="uk")
+
+    assert "https://ggbet.ua/uk-ua/sports/match/vvsb-vs-excelsior-maassluis-27-05" in text
