@@ -32,7 +32,7 @@ LABELS = {
         "risk": "<b>Ризик:</b>",
         "open_match": "Відкрити матч / перевірити результат",
         "bookmaker": "Відкрити лінію",
-        "bookmaker_odds": "💵 <b>Букмекер / кеф:</b>",
+        "bookmaker_odds": "💵 <b>Кеф / лінія:</b>",
         "how": "💰 <b>Як використовувати:</b>\n• не став увесь банк на один матч;\n• не замінюй ринок на інший, якщо потрібної ставки немає;\n• якщо коефіцієнт сильно просів — краще пропустити;\n• це аналітика, а не гарантія виграшу.",
         "no_matches": "⚠️ <b>На сьогодні не знайдено достатньо якісних матчів.</b>\n\nБот не буде публікувати слабкі або сумнівні варіанти тільки заради кількості.",
         "date_time": "🗓 <b>Дата/час (Київ):</b>",
@@ -65,7 +65,7 @@ LABELS = {
         "risk": "<b>Risk:</b>",
         "open_match": "Open match / check result",
         "bookmaker": "Open odds at",
-        "bookmaker_odds": "💵 <b>Bookmaker / odds:</b>",
+        "bookmaker_odds": "💵 <b>Odds / line:</b>",
         "how": "💰 <b>How to use:</b>\n• do not risk your whole bankroll on one match;\n• do not replace the market if the exact pick is unavailable;\n• if the odds dropped too much, it is better to skip;\n• this is analysis, not a guaranteed win.",
         "no_matches": "⚠️ <b>No sufficiently strong matches found for today.</b>\n\nThe bot will not post weak or questionable picks just to fill the quota.",
         "date_time": "🗓 <b>Date/time (Kyiv):</b>",
@@ -98,7 +98,7 @@ LABELS = {
         "risk": "<b>Риск:</b>",
         "open_match": "Открыть матч / проверить результат",
         "bookmaker": "Открыть линию",
-        "bookmaker_odds": "💵 <b>Букмекер / кеф:</b>",
+        "bookmaker_odds": "💵 <b>Кеф / линия:</b>",
         "how": "💰 <b>Как использовать:</b>\n• не ставь весь банк на один матч;\n• не заменяй рынок на другой, если нужной ставки нет;\n• если коэффициент сильно просел — лучше пропустить;\n• это аналитика, а не гарантия выигрыша.",
         "no_matches": "⚠️ <b>На сегодня не найдено достаточно качественных матчей.</b>\n\nБот не будет публиковать слабые или сомнительные варианты только ради количества.",
         "date_time": "🗓 <b>Дата/время (Киев):</b>",
@@ -311,7 +311,7 @@ def bookmaker_odds_line(p: AiPick, lang: str) -> str:
     if not name and not p.bookmaker_odds:
         return ""
     odds = f"{float(p.bookmaker_odds):.2f}" if p.bookmaker_odds else "—"
-    return f"{L(lang, 'bookmaker_odds')} {html_escape(name or 'bookmaker')} @ {html_escape(odds)}"
+    return f"{L(lang, 'bookmaker_odds')} {html_escape(odds)}"
 
 
 def generated_why(p: AiPick, ctx: CandidateContext | None, lang: str) -> str:

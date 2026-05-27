@@ -73,13 +73,13 @@ class Settings(BaseSettings):
     # Старые DraftKings-переменные оставлены для совместимости, но новый resolver
     # по умолчанию ищет точную страницу матча на Oddschecker и fallback-провайдерах.
     bookmaker_link_enabled: bool = Field(True, alias="BOOKMAKER_LINK_ENABLED")
-    bookmaker_name: str = Field("Unibet", alias="BOOKMAKER_NAME")
-    bookmaker_search_url_template: str = Field("", alias="BOOKMAKER_SEARCH_URL_TEMPLATE")
+    bookmaker_name: str = Field("GGBET", alias="BOOKMAKER_NAME")
+    bookmaker_search_url_template: str = Field("https://ggbet.ua/uk/sports", alias="BOOKMAKER_SEARCH_URL_TEMPLATE")
     bookmaker_backup_links_enabled: bool = Field(False, alias="BOOKMAKER_BACKUP_LINKS_ENABLED")
     bookmaker_backup_links: str = Field("", alias="BOOKMAKER_BACKUP_LINKS")
     bookmaker_market_hint: str = Field("Шукай ринок: Total Goals / Over-Under / Тотал голов", alias="BOOKMAKER_MARKET_HINT")
-    bookmaker_resolver_provider: str = Field("unibet", alias="BOOKMAKER_RESOLVER_PROVIDER")
-    bookmaker_fallback_providers_raw: str = Field("oddschecker,ggbet,betking", alias="BOOKMAKER_FALLBACK_PROVIDERS")
+    bookmaker_resolver_provider: str = Field("ggbet", alias="BOOKMAKER_RESOLVER_PROVIDER")
+    bookmaker_fallback_providers_raw: str = Field("oddschecker,betking", alias="BOOKMAKER_FALLBACK_PROVIDERS")
     bookmaker_require_exact_match: bool = Field(True, alias="BOOKMAKER_REQUIRE_EXACT_MATCH")
     bookmaker_hide_if_not_found: bool = Field(True, alias="BOOKMAKER_HIDE_IF_NOT_FOUND")
     bookmaker_resolver_max_results: int = Field(6, alias="BOOKMAKER_RESOLVER_MAX_RESULTS")
@@ -105,7 +105,7 @@ class Settings(BaseSettings):
     min_pick_odds: float = Field(1.35, alias="MIN_PICK_ODDS")
     min_pick_odds_require_available: bool = Field(True, alias="MIN_PICK_ODDS_REQUIRE_AVAILABLE")
     odds_first_enabled: bool = Field(True, alias="ODDS_FIRST_ENABLED")
-    odds_first_bookmaker_id: str = Field("16", alias="ODDS_FIRST_BOOKMAKER_ID")
+    odds_first_bookmaker_id: str = Field("", alias="ODDS_FIRST_BOOKMAKER_ID")
     odds_first_bet_ids_raw: str = Field("", alias="ODDS_FIRST_BET_IDS")
 
     # Safe-mode и самообучение: жестко режем слабые рынки и учитываем историю закрытых прогнозов.
