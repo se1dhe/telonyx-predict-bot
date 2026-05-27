@@ -102,20 +102,20 @@ class BookmakerResolver:
         if not self.settings.bookmaker_link_enabled:
             return "", ""
 
-        provider_keys = self._provider_order()
-        if provider_keys == ["ggbet"]:
-            return await self._resolve_inner(home_team, away_team, provider_keys, start_time)
-
-        if not self.settings.serpapi_key:
-            logger.warning("Bookmaker resolver skipped: SERPAPI_KEY is empty")
-            return "", ""
-
         home_team = str(home_team or "").strip()
         away_team = str(away_team or "").strip()
         if not home_team or not away_team:
             return "", ""
 
-        cache_key = f"{normalize_text(home_team)}::{normalize_text(away_team)}::{start_time if self._provider_order()[:1] == ['ggbet'] else ''}"
+        provider_keys = self._provider_order()
+        if provider_keys and provider_keys[0] == "ggbet":
+            provider_keys = ["ggbet"]
+
+        if not self.settings.serpapi_key and provider_keys != ["ggbet"]:
+            logger.warning("Bookmaker resolver skipped: SERPAPI_KEY is empty")
+            return "", ""
+
+        cache_key = f"{normalize_text(home_team)}::{normalize_text(away_team)}::{start_time if provider_keys == ['ggbet'] else ''}"
         if cache_key in self._cache:
             return self._cache[cache_key]
 
@@ -233,7 +233,7 @@ class BookmakerResolver:
 class GGBetResolver:
     """Точный resolver GGBET через betting GraphQL, а не угадывание slug."""
 
-    bootstrap_url = "https://ggbet.ua/{locale}/"
+    bootstrap_paths = ("https://ggbet.ua/{locale}", "https://ggbet.ua/{locale}/sports")
 
     def __init__(self) -> None:
         self.settings = get_settings()
@@ -295,12 +295,18 @@ class GGBetResolver:
 
         locale = normalize_ggbet_locale(getattr(self.settings, "ggbet_locale", "en"))
         timeout = aiohttp.ClientTimeout(total=max(4, int(getattr(self.settings, "http_timeout_seconds", 12) or 12)))
+        html = ""
         async with aiohttp.ClientSession(timeout=timeout) as session:
-            async with session.get(self.bootstrap_url.format(locale=locale)) as response:
-                if response.status >= 400:
-                    logger.warning("GGBET bootstrap HTTP %s", response.status)
-                    return {}
-                html = await response.text()
+            for template in self.bootstrap_paths:
+                url = template.format(locale=locale)
+                async with session.get(url, allow_redirects=True) as response:
+                    if response.status < 400:
+                        html = await response.text()
+                        break
+                    logger.warning("GGBET bootstrap HTTP %s url=%s", response.status, url)
+
+        if not html:
+            return {}
 
         match = re.search(r'<script id="__NEXT_DATA__" type="application/json">(.*?)</script>', html, re.S)
         if not match:
