@@ -32,6 +32,7 @@ LABELS = {
         "risk": "<b>Ризик:</b>",
         "open_match": "Відкрити матч / перевірити результат",
         "bookmaker": "Відкрити лінію",
+        "bookmaker_odds": "💵 <b>Букмекер / кеф:</b>",
         "how": "💰 <b>Як використовувати:</b>\n• не став увесь банк на один матч;\n• не замінюй ринок на інший, якщо потрібної ставки немає;\n• якщо коефіцієнт сильно просів — краще пропустити;\n• це аналітика, а не гарантія виграшу.",
         "no_matches": "⚠️ <b>На сьогодні не знайдено достатньо якісних матчів.</b>\n\nБот не буде публікувати слабкі або сумнівні варіанти тільки заради кількості.",
         "date_time": "🗓 <b>Дата/час (Київ):</b>",
@@ -64,6 +65,7 @@ LABELS = {
         "risk": "<b>Risk:</b>",
         "open_match": "Open match / check result",
         "bookmaker": "Open odds at",
+        "bookmaker_odds": "💵 <b>Bookmaker / odds:</b>",
         "how": "💰 <b>How to use:</b>\n• do not risk your whole bankroll on one match;\n• do not replace the market if the exact pick is unavailable;\n• if the odds dropped too much, it is better to skip;\n• this is analysis, not a guaranteed win.",
         "no_matches": "⚠️ <b>No sufficiently strong matches found for today.</b>\n\nThe bot will not post weak or questionable picks just to fill the quota.",
         "date_time": "🗓 <b>Date/time (Kyiv):</b>",
@@ -96,6 +98,7 @@ LABELS = {
         "risk": "<b>Риск:</b>",
         "open_match": "Открыть матч / проверить результат",
         "bookmaker": "Открыть линию",
+        "bookmaker_odds": "💵 <b>Букмекер / кеф:</b>",
         "how": "💰 <b>Как использовать:</b>\n• не ставь весь банк на один матч;\n• не заменяй рынок на другой, если нужной ставки нет;\n• если коэффициент сильно просел — лучше пропустить;\n• это аналитика, а не гарантия выигрыша.",
         "no_matches": "⚠️ <b>На сегодня не найдено достаточно качественных матчей.</b>\n\nБот не будет публиковать слабые или сомнительные варианты только ради количества.",
         "date_time": "🗓 <b>Дата/время (Киев):</b>",
@@ -285,12 +288,12 @@ def confidence_text(confidence: int, lang: str) -> str:
     return "низька"
 
 
-def bookmaker_link_line(match_title: str, bookmaker_url: str = "", lang: str = "uk") -> str:
+def bookmaker_link_line(match_title: str, bookmaker_url: str = "", lang: str = "uk", bookmaker_name: str = "", odds: float | None = None) -> str:
     settings = get_settings()
     if not settings.bookmaker_link_enabled:
         return ""
 
-    name = settings.bookmaker_name or "bookmaker"
+    name = bookmaker_name or settings.bookmaker_name or "bookmaker"
     url = str(bookmaker_url or "").strip()
 
     if not url and settings.bookmaker_search_url_template:
@@ -299,7 +302,16 @@ def bookmaker_link_line(match_title: str, bookmaker_url: str = "", lang: str = "
     if not url:
         return ""
 
-    return f'💵 <a href="{html_escape(url)}">{L(lang, "bookmaker")} {html_escape(name)}</a>'
+    odds_text = f" • {float(odds):.2f}" if odds else ""
+    return f'💵 <a href="{html_escape(url)}">{L(lang, "bookmaker")} {html_escape(name)}{html_escape(odds_text)}</a>'
+
+
+def bookmaker_odds_line(p: AiPick, lang: str) -> str:
+    name = p.bookmaker_name or get_settings().bookmaker_name or ""
+    if not name and not p.bookmaker_odds:
+        return ""
+    odds = f"{float(p.bookmaker_odds):.2f}" if p.bookmaker_odds else "—"
+    return f"{L(lang, 'bookmaker_odds')} {html_escape(name or 'bookmaker')} @ {html_escape(odds)}"
 
 
 def generated_why(p: AiPick, ctx: CandidateContext | None, lang: str) -> str:
@@ -356,11 +368,16 @@ def render_daily_summary(
             f"{risk_emoji(p.risk_level)} {L(lang, 'risk')} {RISK[lang][risk_key(p.risk_level)]}",
         ])
 
+        odds_line = bookmaker_odds_line(p, lang)
+        if odds_line:
+            lines.append(odds_line)
+
         if p.tracking_url:
             lines.append(f'🔗 <a href="{html_escape(p.tracking_url)}">{L(lang, "open_match")}</a>')
 
-        if p.bookmaker_url:
-            lines.append(bookmaker_link_line(p.match_title, p.bookmaker_url, lang))
+        line = bookmaker_link_line(p.match_title, p.bookmaker_url, lang, p.bookmaker_name, p.bookmaker_odds)
+        if line:
+            lines.append(line)
 
         lines.append("")
 
@@ -395,6 +412,7 @@ def render_pick_detail(p: AiPick, ctx: CandidateContext | None = None, lang: str
         "",
         f"{L(lang, 'main_bet')} {html_escape(main)}",
         bet_instruction(p, lang),
+        bookmaker_odds_line(p, lang),
         f"{L(lang, 'confidence')} {p.confidence}/100 ({confidence_text(p.confidence, lang)})",
         f"{risk_emoji(p.risk_level)} {L(lang, 'risk')} {RISK[lang][risk_key(p.risk_level)]}",
         "",
@@ -413,10 +431,9 @@ def render_pick_detail(p: AiPick, ctx: CandidateContext | None = None, lang: str
         lines.append("")
         lines.append(f'🔗 <a href="{html_escape(p.tracking_url)}">{L(lang, "open_match")}</a>')
 
-    if p.bookmaker_url:
-        line = bookmaker_link_line(p.match_title, p.bookmaker_url, lang)
-        if line:
-            lines.append(line)
+    line = bookmaker_link_line(p.match_title, p.bookmaker_url, lang, p.bookmaker_name, p.bookmaker_odds)
+    if line:
+        lines.append(line)
 
     lines.append("")
     lines.append(L(lang, "disclaimer"))

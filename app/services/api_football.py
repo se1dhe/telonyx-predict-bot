@@ -53,6 +53,9 @@ class ApiFootballClient:
 
     async def fixtures_by_date(self, target_date: date) -> list[RawFixture]:
         """Получить матчи на дату."""
+        if self.settings.odds_first_enabled:
+            return await self.fixtures_by_odds_date(target_date)
+
         payload = await self.get_json(
             "/fixtures",
             {
@@ -87,6 +90,101 @@ class ApiFootballClient:
             )
 
         return fixtures
+
+    async def fixtures_by_odds_date(self, target_date: date) -> list[RawFixture]:
+        """Получить матчдэй из pre-match odds, а не из общего расписания."""
+        rows = await self.odds_by_date(target_date)
+        fixtures: list[RawFixture] = []
+        seen: set[str] = set()
+
+        for row in rows:
+            if not odds_row_has_min_allowed_market(row, self.settings.min_pick_odds, set(self.settings.safe_mode_allowed_bets)):
+                continue
+
+            fixture_obj = row.get("fixture", {}) or {}
+            fixture_id = str(fixture_obj.get("id") or "")
+            if not fixture_id or fixture_id in seen:
+                continue
+
+            details = await self.fixture_by_id(fixture_id)
+            if not details:
+                logger.info("API_FOOTBALL odds-first skipped fixture=%s: fixture details not found", fixture_id)
+                continue
+
+            fixture = details.get("fixture", {}) or {}
+            league = details.get("league", {}) or row.get("league", {}) or {}
+            teams = details.get("teams", {}) or {}
+
+            home = teams.get("home", {}) or {}
+            away = teams.get("away", {}) or {}
+            home_name = str(home.get("name") or "")
+            away_name = str(away.get("name") or "")
+            if not home_name or not away_name:
+                logger.info("API_FOOTBALL odds-first skipped fixture=%s: team names missing", fixture_id)
+                continue
+
+            seen.add(fixture_id)
+            fixtures.append(
+                RawFixture(
+                    fixture_id=fixture_id,
+                    date=fixture.get("date") or fixture_obj.get("date") or "",
+                    timestamp=fixture.get("timestamp") or fixture_obj.get("timestamp"),
+                    status=fixture.get("status") or {"short": "NS"},
+                    league_id=str(league.get("id") or ""),
+                    league_name=str(league.get("name") or ""),
+                    country=str(league.get("country") or ""),
+                    season=league.get("season"),
+                    home_team_id=str(home.get("id") or ""),
+                    away_team_id=str(away.get("id") or ""),
+                    home_team=home_name,
+                    away_team=away_name,
+                    provider="API_FOOTBALL",
+                    source_league_code=str(league.get("id") or ""),
+                    prematch_odds=simplify_odds([row]),
+                )
+            )
+            if len(fixtures) >= max(1, self.settings.max_raw_events):
+                break
+
+        logger.info("API_FOOTBALL odds-first returned fixtures=%s from odds_rows=%s", len(fixtures), len(rows))
+        return fixtures
+
+    async def odds_by_date(self, target_date: date) -> list[dict[str, Any]]:
+        """Получить pre-match odds на дату с учётом пагинации API-Football."""
+        params: dict[str, Any] = {
+            "date": target_date.isoformat(),
+        }
+        if self.settings.odds_first_bookmaker_id.strip():
+            params["bookmaker"] = self.settings.odds_first_bookmaker_id.strip()
+
+        bet_ids = self.settings.odds_first_bet_ids
+        if bet_ids:
+            rows: list[dict[str, Any]] = []
+            for bet_id in bet_ids:
+                bet_params = dict(params)
+                bet_params["bet"] = bet_id
+                rows.extend(await self._paged_odds(bet_params))
+            return rows
+
+        return await self._paged_odds(params)
+
+    async def _paged_odds(self, params: dict[str, Any]) -> list[dict[str, Any]]:
+        rows: list[dict[str, Any]] = []
+        page = 1
+
+        while True:
+            payload = await self.get_json("/odds", {**params, "page": page})
+            rows.extend(payload.get("response", []) or [])
+
+            paging = payload.get("paging") or {}
+            current = int(paging.get("current") or page)
+            total = int(paging.get("total") or current)
+            if current >= total:
+                break
+
+            page += 1
+
+        return rows
 
     async def fixture_by_id(self, fixture_id: str) -> dict[str, Any] | None:
         """Получить конкретный матч по ID."""
@@ -194,6 +292,8 @@ class ApiFootballClient:
             fixture.season,
         )
 
+        odds_coro = self.odds(fixture.fixture_id) if not fixture.prematch_odds else asyncio.sleep(0, result=fixture.prematch_odds)
+
         home_last, away_last, h2h_rows, standings_rows, injuries_rows, odds_rows = await asyncio.gather(
             self.team_last_fixtures(
                 fixture.home_team_id,
@@ -210,7 +310,7 @@ class ApiFootballClient:
             self.h2h(fixture.home_team_id, fixture.away_team_id),
             self.standings(fixture.league_id, fixture.season or self.settings.apifootball_season),
             self.injuries(fixture.fixture_id),
-            self.odds(fixture.fixture_id),
+            odds_coro,
         )
 
         home_metrics = metrics_from_api_fixtures(home_last, fixture.home_team_id)
@@ -233,7 +333,7 @@ class ApiFootballClient:
             h2h=compact_h2h(h2h_rows, fixture.home_team_id, fixture.away_team_id),
             standings=compact_standings(standings_rows, fixture.home_team_id, fixture.away_team_id),
             injuries=compact_injuries(injuries_rows),
-            odds=simplify_odds(odds_rows),
+            odds=odds_rows if fixture.prematch_odds else simplify_odds(odds_rows),
             match_url="",
         )
 
@@ -379,6 +479,55 @@ def simplify_odds(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
                     )
 
     return result[:10]
+
+
+def odds_row_has_min_allowed_market(row: dict[str, Any], min_odds: float, allowed_bets: set[str]) -> bool:
+    """Проверить, что в строке odds есть разрешённый рынок с нужным коэффициентом."""
+    for bookmaker in row.get("bookmakers", []) or []:
+        for bet in bookmaker.get("bets", []) or []:
+            market = str(bet.get("name") or "")
+            for value in bet.get("values", []) or []:
+                if not isinstance(value, dict):
+                    continue
+                odd = parse_odd(value.get("odd"))
+                if odd is None or odd < min_odds:
+                    continue
+                if bet_value_to_code(market, str(value.get("value") or "")) in allowed_bets:
+                    return True
+
+    return False
+
+
+def bet_value_to_code(market: str, value: str) -> str:
+    """Грубо сопоставить рынок API-Football с внутренним BetCode."""
+    market_l = str(market or "").lower()
+    value_l = str(value or "").lower()
+    text = f"{market_l} {value_l}"
+
+    if "over" in text and ("1.5" in text or "1,5" in text):
+        return "OVER_1_5"
+    if "over" in text and ("2.5" in text or "2,5" in text):
+        return "OVER_2_5"
+    if ("both teams" in market_l or "btts" in market_l) and value_l in {"yes", "так"}:
+        return "BTTS_YES"
+    if "double chance" in market_l and ("home/draw" in value_l or "1x" in value_l):
+        return "HOME_DOUBLE_CHANCE"
+    if "double chance" in market_l and ("draw/away" in value_l or "x2" in value_l):
+        return "AWAY_DOUBLE_CHANCE"
+    if ("draw no bet" in market_l or "dnb" in market_l) and value_l == "home":
+        return "HOME_DNB"
+    if ("draw no bet" in market_l or "dnb" in market_l) and value_l == "away":
+        return "AWAY_DNB"
+
+    return ""
+
+
+def parse_odd(raw: object) -> float | None:
+    try:
+        odd = float(str(raw).strip().replace(",", "."))
+    except (TypeError, ValueError):
+        return None
+    return odd if odd > 1 else None
 
 
 def calculate_data_quality(ctx: CandidateContext) -> int:

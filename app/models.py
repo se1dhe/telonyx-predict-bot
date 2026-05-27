@@ -40,6 +40,7 @@ class Prediction(Base):
     # Bookmaker/post-update runtime fields.
     bookmaker_url: Mapped[str] = mapped_column(Text, default="")
     bookmaker_name: Mapped[str] = mapped_column(String(128), default="")
+    bookmaker_odds: Mapped[str] = mapped_column(String(32), default="")
     bookmaker_checked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     bookmaker_resolved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     private_message_refs: Mapped[str] = mapped_column(Text, default="")

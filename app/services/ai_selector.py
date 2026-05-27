@@ -142,6 +142,7 @@ HOME_OR_DRAW_OVER_1_5, AWAY_OR_DRAW_OVER_1_5, HOME_DNB, AWAY_DNB, NO_BET.
 Вимоги:
 - Не обирай нижче confidence {self.settings.min_ai_confidence}.
 - Не давай агресивні ставки без сильних даних.
+- Якщо в даних кандидата є odds для обраного ринку, не обирай ставку з коефіцієнтом нижче {self.settings.min_pick_odds:.2f}.
 - Якщо матч сумнівний — відхиляй.
 - Для risk_level використовуй тільки: низький, середній, високий.
 - tracking_url і bookmaker_url бери з даних кандидата, якщо вони є.

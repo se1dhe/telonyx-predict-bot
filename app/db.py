@@ -155,6 +155,7 @@ async def ensure_runtime_columns(conn) -> None:
     prediction_columns = {
         "bookmaker_url": "TEXT",
         "bookmaker_name": "TEXT",
+        "bookmaker_odds": "TEXT",
         "bookmaker_checked_at": "DATETIME",
         "bookmaker_resolved_at": "DATETIME",
         "private_message_refs": "TEXT",

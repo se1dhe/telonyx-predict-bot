@@ -54,7 +54,7 @@ class DailyPipeline:
 
     async def run_for_date(self, target_date: date, force: bool = False) -> tuple[dict[str, str], dict[str, list[str]]]:
         date_key = target_date.isoformat()
-        provider_name = self.settings.provider_normalized
+        provider_name = "API_FOOTBALL" if self.settings.odds_first_enabled else self.settings.provider_normalized
         ai_provider_name = (self.settings.ai_provider or "ai").strip().lower()
         if not force:
             cached = await self._load_existing_texts(date_key, provider_name)
@@ -166,6 +166,11 @@ class DailyPipeline:
             logger.exception("Learning calibrator failed, continue without calibration")
             debug.append(f"⚠️ Learning calibrator error: <code>{escape(str(exc)[:500])}</code>")
 
+        picks, odds_rejected = self._filter_picks_by_min_odds(picks, contexts)
+        if odds_rejected:
+            ai_response.rejected_summary.extend([f"Odds: {item}" for item in odds_rejected])
+            debug.append(f"💸 Odds-фільтр відсіяв: {len(odds_rejected)}")
+
         ctx_by_id_for_sort = {c.fixture_id: c for c in contexts}
         picks.sort(key=lambda p: pick_start_sort_timestamp(p, ctx_by_id_for_sort))
 
@@ -268,6 +273,54 @@ class DailyPipeline:
                 continue
             pick.tracking_url = ctx.tracking_url
         return picks
+
+    def _filter_picks_by_min_odds(self, picks: list[AiPick], contexts: list[CandidateContext]) -> tuple[list[AiPick], list[str]]:
+        """Отсеять прогнозы, если известный коэффициент выбранного рынка ниже MIN_PICK_ODDS."""
+        min_odds = float(getattr(self.settings, "min_pick_odds", 0) or 0)
+        if min_odds <= 1:
+            return picks, []
+
+        ctx_by_id = {ctx.fixture_id: ctx for ctx in contexts}
+        require_available = bool(getattr(self.settings, "min_pick_odds_require_available", False))
+        result: list[AiPick] = []
+        rejected: list[str] = []
+
+        for pick in picks:
+            ctx = ctx_by_id.get(pick.fixture_id)
+            odds = find_pick_market_odds(pick, ctx)
+
+            if odds is None:
+                if require_available:
+                    rejected.append(f"{pick.match_title}: немає коефіцієнта для {pick.main_bet_code}")
+                    continue
+                result.append(pick)
+                continue
+
+            if odds < min_odds:
+                rejected.append(f"{pick.match_title}: {pick.main_bet_code} коеф. {odds:.2f} нижче {min_odds:.2f}")
+                continue
+
+            warnings = list(pick.data_warnings or [])
+            warnings.append(f"Коефіцієнт ринку: {odds:.2f}")
+            result.append(
+                pick.model_copy(
+                    update={
+                        "bookmaker_name": self.settings.bookmaker_name,
+                        "bookmaker_odds": odds,
+                        "data_warnings": warnings[:6],
+                    }
+                )
+            )
+
+        logger.info(
+            "Odds filter: input=%s output=%s rejected=%s min_odds=%.2f require_available=%s",
+            len(picks),
+            len(result),
+            len(rejected),
+            min_odds,
+            require_available,
+        )
+        return result, rejected[:10]
 
     def _filter_raw_fixtures(self, fixtures: list) -> tuple[list, FixtureFilterStats]:
         allowed = self.settings.allowed_countries
@@ -374,6 +427,8 @@ class DailyPipeline:
                     existing.main_bet_code = pick.main_bet_code; existing.main_bet_label = pick.main_bet_label
                     existing.confidence = pick.confidence; existing.ai_rank_score = pick.ai_rank_score
                     existing.bookmaker_url = pick.bookmaker_url
+                    existing.bookmaker_name = pick.bookmaker_name or existing.bookmaker_name
+                    existing.bookmaker_odds = format_bookmaker_odds(pick.bookmaker_odds)
                     existing.start_time = ctx.start_time if ctx else existing.start_time
                 else:
                     session.add(Prediction(date_key=date_key, provider=provider_name, fixture_id=pick.fixture_id,
@@ -381,7 +436,8 @@ class DailyPipeline:
                         country=ctx.country if ctx else "", start_time=ctx.start_time if ctx else "",
                         source_league_code=ctx.source_league_code if ctx else "", prediction_json=pick.model_dump_json(),
                         rendered_text=rendered, main_bet_code=pick.main_bet_code, main_bet_label=pick.main_bet_label,
-                        confidence=pick.confidence, ai_rank_score=pick.ai_rank_score, bookmaker_url=pick.bookmaker_url))
+                        confidence=pick.confidence, ai_rank_score=pick.ai_rank_score, bookmaker_url=pick.bookmaker_url,
+                        bookmaker_name=pick.bookmaker_name, bookmaker_odds=format_bookmaker_odds(pick.bookmaker_odds)))
             await session.commit()
 
 
@@ -461,6 +517,72 @@ def fixture_sort_timestamp(fixture: object) -> int:
     if isinstance(fixture, dict):
         return int(fixture.get("fixture", {}).get("timestamp") or 9999999999)
     return int(getattr(fixture, "timestamp", None) or 9999999999)
+
+
+def find_pick_market_odds(pick: AiPick, ctx: CandidateContext | None) -> float | None:
+    """Найти коэффициент именно для выбранного рынка, если источник его дал."""
+    if not ctx or not ctx.odds:
+        return None
+
+    for offer in ctx.odds:
+        if not isinstance(offer, dict):
+            continue
+
+        market = str(offer.get("market") or "").lower()
+        values = offer.get("values") or []
+        if not isinstance(values, list):
+            continue
+
+        for value in values:
+            if not isinstance(value, dict):
+                continue
+            label = str(value.get("value") or value.get("name") or value.get("label") or "").lower()
+            odd = parse_odd(value.get("odd") or value.get("odds") or value.get("price"))
+            if odd is None:
+                continue
+            if odds_value_matches_pick(pick, ctx, market, label):
+                return odd
+
+    return None
+
+
+def odds_value_matches_pick(pick: AiPick, ctx: CandidateContext, market: str, label: str) -> bool:
+    """Сопоставить наш BetCode с названиями рынков API-Football."""
+    code = pick.main_bet_code
+    text = f"{market} {label}".lower()
+    home = ctx.home_team.lower()
+    away = ctx.away_team.lower()
+
+    if code == "OVER_1_5":
+        return "over" in text and ("1.5" in text or "1,5" in text)
+    if code == "OVER_2_5":
+        return "over" in text and ("2.5" in text or "2,5" in text)
+    if code == "BTTS_YES":
+        return ("both teams" in market or "btts" in market) and label in {"yes", "так"}
+    if code == "HOME_DOUBLE_CHANCE":
+        return "double chance" in market and ("home/draw" in label or "1x" in label or home in label)
+    if code == "AWAY_DOUBLE_CHANCE":
+        return "double chance" in market and ("draw/away" in label or "x2" in label or away in label)
+    if code == "HOME_DNB":
+        return ("draw no bet" in market or "dnb" in market) and (label == "home" or home in label)
+    if code == "AWAY_DNB":
+        return ("draw no bet" in market or "dnb" in market) and (label == "away" or away in label)
+
+    return False
+
+
+def parse_odd(raw: object) -> float | None:
+    try:
+        odd = float(str(raw).strip().replace(",", "."))
+    except (TypeError, ValueError):
+        return None
+    return odd if odd > 1 else None
+
+
+def format_bookmaker_odds(value: float | None) -> str:
+    if value is None:
+        return ""
+    return f"{float(value):.2f}"
 
 
 def split_match_title(title: str) -> tuple[str, str]:

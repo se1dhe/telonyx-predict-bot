@@ -50,6 +50,16 @@ PROVIDERS: dict[str, BookmakerProvider] = {
             'site:oddschecker.com "{home} v {away}" football odds',
         ),
     ),
+    "unibet": BookmakerProvider(
+        key="unibet",
+        display_name="Unibet",
+        domains=("unibet.com", "unibet.co.uk"),
+        queries=(
+            'site:unibet.com/betting/sports/filter/football "{home}" "{away}"',
+            'site:unibet.com "{home}" "{away}" football odds',
+            'site:unibet.co.uk "{home}" "{away}" football odds',
+        ),
+    ),
     "ggbet": BookmakerProvider(
         key="ggbet",
         display_name="GGBET",

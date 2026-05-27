@@ -5,4 +5,7 @@ from app.services.free_data_provider import FreeDataProvider
 
 def get_data_provider() -> ApiFootballClient | FreeDataProvider:
     """Вернуть источник данных по DATA_PROVIDER."""
-    return ApiFootballClient() if get_settings().provider_normalized == "API_FOOTBALL" else FreeDataProvider()
+    settings = get_settings()
+    if settings.odds_first_enabled:
+        return ApiFootballClient()
+    return ApiFootballClient() if settings.provider_normalized == "API_FOOTBALL" else FreeDataProvider()

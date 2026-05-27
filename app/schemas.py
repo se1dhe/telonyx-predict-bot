@@ -63,6 +63,7 @@ class RawFixture(BaseModel):
 
     provider: str = "API_FOOTBALL"
     source_league_code: str = ""
+    prematch_odds: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class CandidateContext(BaseModel):
@@ -126,6 +127,8 @@ class AiPick(BaseModel):
     data_warnings: list[str] = Field(default_factory=list)
     tracking_url: str
     bookmaker_url: str = ""
+    bookmaker_name: str = ""
+    bookmaker_odds: float | None = None
 
 
 class AiSelectionResponse(BaseModel):
