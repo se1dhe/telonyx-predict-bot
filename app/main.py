@@ -11,7 +11,7 @@ from aiogram.enums import ParseMode
 from app.bot_handlers import router
 from app.config import get_settings
 from app.db import init_db
-from app.runtime_lock import acquire_runtime_lock, idle_without_telegram_runtime
+from app.runtime_lock import wait_for_runtime_lock
 from app.scheduler import send_daily_gold_matches, setup_scheduler
 from app.web import start_web_server
 
@@ -33,14 +33,7 @@ async def main() -> None:
 
     await start_web_server(bot, settings.web_host, settings.web_port)
 
-    runtime_lock = await acquire_runtime_lock()
-    if not runtime_lock.acquired:
-        logging.warning(
-            "TelOnyx Predict Bot запущен как web-only replica. "
-            "Telegram polling и scheduler отключены, потому что активен другой инстанс."
-        )
-        await idle_without_telegram_runtime()
-        return
+    runtime_lock = await wait_for_runtime_lock()
 
     try:
         setup_scheduler(bot)

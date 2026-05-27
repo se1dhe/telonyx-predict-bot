@@ -77,6 +77,25 @@ async def acquire_runtime_lock() -> RuntimeLock:
     return RuntimeLock(acquired=False)
 
 
+async def wait_for_runtime_lock(retry_seconds: int = 5) -> RuntimeLock:
+    """Ждать lock при rolling deploy, пока старая Railway-реплика завершится."""
+    attempt = 0
+    while True:
+        attempt += 1
+        runtime_lock = await acquire_runtime_lock()
+        if runtime_lock.acquired:
+            if attempt > 1:
+                logger.info("Runtime singleton lock acquired after %s attempts", attempt)
+            return runtime_lock
+
+        logger.warning(
+            "Runtime singleton lock is busy; retrying in %s seconds. attempt=%s",
+            retry_seconds,
+            attempt,
+        )
+        await asyncio.sleep(max(1, retry_seconds))
+
+
 async def idle_without_telegram_runtime() -> None:
     """Держать web/health процесс живым, не запуская Telegram polling."""
     while True:
