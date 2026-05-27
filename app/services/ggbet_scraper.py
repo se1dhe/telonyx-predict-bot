@@ -53,6 +53,13 @@ class GGBetScraper:
 
         try:
             with sync_playwright() as p:
+                proxy = build_playwright_proxy(
+                    self.settings.ggbet_proxy_server,
+                    self.settings.ggbet_proxy_username,
+                    self.settings.ggbet_proxy_password,
+                )
+                if proxy:
+                    logger.info("GGBET scraper: using configured proxy server=%s", proxy.get("server"))
                 browser = p.chromium.launch(
                     headless=bool(self.settings.ggbet_scraper_headless),
                     args=[
@@ -69,6 +76,7 @@ class GGBetScraper:
                     locale="en-US",
                     timezone_id=self.settings.tz,
                     viewport={"width": 1280, "height": 900},
+                    proxy=proxy,
                 )
                 context.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
                 page = context.new_page()
@@ -152,6 +160,18 @@ def log_empty_links_diagnostics(page: object) -> None:
         )
     except Exception as exc:
         logger.warning("GGBET scraper: failed no-link diagnostics: %s", exc)
+
+
+def build_playwright_proxy(server: str, username: str = "", password: str = "") -> dict[str, str] | None:
+    value = str(server or "").strip()
+    if not value:
+        return None
+    proxy: dict[str, str] = {"server": value}
+    if username:
+        proxy["username"] = str(username)
+    if password:
+        proxy["password"] = str(password)
+    return proxy
 
 
 def parse_match_page(url: str, text: str, tz: ZoneInfo) -> GGBetEvent | None:

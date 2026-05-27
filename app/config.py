@@ -122,6 +122,9 @@ class Settings(BaseSettings):
     ggbet_scraper_headless: bool = Field(True, alias="GGBET_SCRAPER_HEADLESS")
     ggbet_scraper_timeout_ms: int = Field(60000, alias="GGBET_SCRAPER_TIMEOUT_MS")
     ggbet_scraper_min_odds: float = Field(1.35, alias="GGBET_SCRAPER_MIN_ODDS")
+    ggbet_proxy_server: str = Field("", alias="GGBET_PROXY_SERVER")
+    ggbet_proxy_username: str = Field("", alias="GGBET_PROXY_USERNAME")
+    ggbet_proxy_password: str = Field("", alias="GGBET_PROXY_PASSWORD")
 
     # Safe-mode и самообучение: жестко режем слабые рынки и учитываем историю закрытых прогнозов.
     safe_mode_enabled: bool = Field(True, alias="SAFE_MODE_ENABLED")
