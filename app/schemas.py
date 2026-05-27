@@ -64,6 +64,7 @@ class RawFixture(BaseModel):
     provider: str = "API_FOOTBALL"
     source_league_code: str = ""
     prematch_odds: list[dict[str, Any]] = Field(default_factory=list)
+    match_url: str = ""
 
 
 class CandidateContext(BaseModel):

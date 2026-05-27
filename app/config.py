@@ -115,6 +115,13 @@ class Settings(BaseSettings):
     odds_first_enabled: bool = Field(True, alias="ODDS_FIRST_ENABLED")
     odds_first_bookmaker_id: str = Field("", alias="ODDS_FIRST_BOOKMAKER_ID")
     odds_first_bet_ids_raw: str = Field("5", alias="ODDS_FIRST_BET_IDS")
+    ggbet_odds_first_enabled: bool = Field(False, alias="GGBET_ODDS_FIRST_ENABLED")
+    ggbet_football_url: str = Field("https://ggbet.ua/en/bets?sportId=football", alias="GGBET_FOOTBALL_URL")
+    ggbet_scraper_limit: int = Field(80, alias="GGBET_SCRAPER_LIMIT")
+    ggbet_scraper_match_limit: int = Field(80, alias="GGBET_SCRAPER_MATCH_LIMIT")
+    ggbet_scraper_headless: bool = Field(True, alias="GGBET_SCRAPER_HEADLESS")
+    ggbet_scraper_timeout_ms: int = Field(60000, alias="GGBET_SCRAPER_TIMEOUT_MS")
+    ggbet_scraper_min_odds: float = Field(1.35, alias="GGBET_SCRAPER_MIN_ODDS")
 
     # Safe-mode и самообучение: жестко режем слабые рынки и учитываем историю закрытых прогнозов.
     safe_mode_enabled: bool = Field(True, alias="SAFE_MODE_ENABLED")

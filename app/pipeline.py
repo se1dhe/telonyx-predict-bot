@@ -59,7 +59,7 @@ class DailyPipeline:
 
     async def run_for_date(self, target_date: date, force: bool = False) -> tuple[dict[str, str], dict[str, list[str]]]:
         date_key = target_date.isoformat()
-        provider_name = "API_FOOTBALL" if self.settings.odds_first_enabled else self.settings.provider_normalized
+        provider_name = "API_FOOTBALL" if (self.settings.odds_first_enabled or self.settings.ggbet_odds_first_enabled) else self.settings.provider_normalized
         ai_provider_name = (self.settings.ai_provider or "ai").strip().lower()
         if not force:
             cached = await self._load_existing_texts(date_key, provider_name)
@@ -309,14 +309,17 @@ class DailyPipeline:
             url = ""
             provider_name = ""
 
-            url, provider_name = await self.bookmaker.resolve(home, away, ctx.start_time if ctx else "")
+            if ctx and "ggbet.ua/" in str(ctx.match_url or ""):
+                url, provider_name = ctx.match_url, "GGBET"
+            else:
+                url, provider_name = await self.bookmaker.resolve(home, away, ctx.start_time if ctx else "")
 
             pick.bookmaker_url = url
 
             if provider_name:
                 setattr(pick, "bookmaker_name", provider_name)
 
-            if provider_name.lower() == "ggbet" and url:
+            if provider_name.lower() == "ggbet" and url and pick.bookmaker_odds is None:
                 ggbet_odds = await self.bookmaker.ggbet_market_odds(url, pick.main_bet_code)
                 pick.bookmaker_odds = ggbet_odds
                 if ggbet_odds:

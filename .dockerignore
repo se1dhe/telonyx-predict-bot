@@ -1,0 +1,11 @@
+.env
+.env.*
+.git
+.gitignore
+.pytest_cache
+.pycache_check
+.playwright-mcp
+data
+ggbet
+__pycache__
+*.pyc

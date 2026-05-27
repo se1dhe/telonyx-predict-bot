@@ -181,7 +181,7 @@ async def send_daily_gold_matches(bot: Bot) -> None:
 async def already_published_today() -> bool:
     """Не публиковать повторный daily-run после redeploy, если карточки уже ушли."""
     settings = get_settings()
-    provider = "API_FOOTBALL" if settings.odds_first_enabled else settings.provider_normalized
+    provider = "API_FOOTBALL" if (settings.odds_first_enabled or settings.ggbet_odds_first_enabled) else settings.provider_normalized
     date_key = datetime.now(ZoneInfo(settings.tz)).date().isoformat()
 
     async with SessionLocal() as session:
@@ -214,7 +214,7 @@ async def save_sent_message_refs(
         return
 
     settings = get_settings()
-    provider = settings.provider_normalized
+    provider = "API_FOOTBALL" if (settings.odds_first_enabled or settings.ggbet_odds_first_enabled) else settings.provider_normalized
     date_key = datetime.now(ZoneInfo(settings.tz)).date().isoformat()
 
     async with SessionLocal() as session:

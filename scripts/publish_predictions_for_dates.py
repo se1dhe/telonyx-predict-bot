@@ -156,7 +156,7 @@ async def edit_existing_posts(bot: Bot, date_key: str, provider: str) -> int:
 
 async def publish_date(bot: Bot, target_date: date, clear: bool, send: bool, edit_existing: bool) -> None:
     settings = get_settings()
-    provider = "API_FOOTBALL" if settings.odds_first_enabled else settings.provider_normalized
+    provider = "API_FOOTBALL" if (settings.odds_first_enabled or settings.ggbet_odds_first_enabled) else settings.provider_normalized
     date_key = target_date.isoformat()
 
     if clear:

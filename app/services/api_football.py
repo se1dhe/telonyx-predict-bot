@@ -10,6 +10,7 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 
 from app.config import get_settings
 from app.schemas import CandidateContext, RawFixture, TeamMetrics
+from app.services.ggbet_scraper import GGBetEvent, GGBetScraper, ggbet_event_to_odds, teams_match
 
 
 logger = logging.getLogger(__name__)
@@ -53,9 +54,16 @@ class ApiFootballClient:
 
     async def fixtures_by_date(self, target_date: date) -> list[RawFixture]:
         """Получить матчи на дату."""
+        if self.settings.ggbet_odds_first_enabled:
+            return await self.fixtures_by_ggbet_odds_date(target_date)
+
         if self.settings.odds_first_enabled:
             return await self.fixtures_by_odds_date(target_date)
 
+        return await self.fixtures_by_regular_date(target_date)
+
+    async def fixtures_by_regular_date(self, target_date: date) -> list[RawFixture]:
+        """Получить все fixtures API-FOOTBALL на дату без odds-first."""
         payload = await self.get_json(
             "/fixtures",
             {
@@ -89,6 +97,45 @@ class ApiFootballClient:
                 )
             )
 
+        return fixtures
+
+    async def fixtures_by_ggbet_odds_date(self, target_date: date) -> list[RawFixture]:
+        """Use GGBET as the odds/link source, then attach API-Football fixture ids for stats."""
+        ggbet_events = await GGBetScraper().events_by_date(target_date)
+        if not ggbet_events:
+            logger.warning("GGBET odds-first returned no events for %s", target_date)
+            return []
+
+        api_fixtures = await self.fixtures_by_regular_date(target_date)
+        fixtures: list[RawFixture] = []
+        used_fixture_ids: set[str] = set()
+
+        for event in ggbet_events:
+            fixture = match_ggbet_event_to_fixture(event, api_fixtures, used_fixture_ids)
+            if not fixture:
+                logger.info("GGBET odds-first skipped unmatched event: %s", event.title)
+                continue
+
+            used_fixture_ids.add(fixture.fixture_id)
+            fixtures.append(
+                fixture.model_copy(
+                    update={
+                        "provider": "API_FOOTBALL",
+                        "prematch_odds": ggbet_event_to_odds(event),
+                        "match_url": event.url,
+                    }
+                )
+            )
+
+            if len(fixtures) >= max(1, self.settings.max_raw_events):
+                break
+
+        logger.info(
+            "GGBET odds-first returned fixtures=%s from ggbet_events=%s api_fixtures=%s",
+            len(fixtures),
+            len(ggbet_events),
+            len(api_fixtures),
+        )
         return fixtures
 
     async def fixtures_by_odds_date(self, target_date: date) -> list[RawFixture]:
@@ -334,7 +381,7 @@ class ApiFootballClient:
             standings=compact_standings(standings_rows, fixture.home_team_id, fixture.away_team_id),
             injuries=compact_injuries(injuries_rows),
             odds=odds_rows if fixture.prematch_odds else simplify_odds(odds_rows),
-            match_url="",
+            match_url=fixture.match_url,
         )
 
         ctx.data_quality_score = calculate_data_quality(ctx)
@@ -393,6 +440,37 @@ def metrics_from_api_fixtures(rows: list[dict[str, Any]], team_id: str) -> TeamM
             metrics.clean_sheets += 1
 
     return metrics
+
+
+def match_ggbet_event_to_fixture(
+    event: GGBetEvent,
+    fixtures: list[RawFixture],
+    used_fixture_ids: set[str],
+) -> RawFixture | None:
+    """Find the API-Football fixture for a GGBET event by team names."""
+    best: tuple[int, RawFixture] | None = None
+    for fixture in fixtures:
+        if fixture.fixture_id in used_fixture_ids:
+            continue
+
+        direct = teams_match(event.home_team, fixture.home_team) and teams_match(event.away_team, fixture.away_team)
+        swapped = teams_match(event.home_team, fixture.away_team) and teams_match(event.away_team, fixture.home_team)
+        if not direct and not swapped:
+            continue
+
+        score = 100 if direct else 80
+        if event.start_time and fixture.timestamp:
+            # Prefer the fixture closest to the GGBET start time when duplicated names exist.
+            try:
+                delta_minutes = abs(int(event.start_time.timestamp()) - int(fixture.timestamp)) // 60
+                score -= min(30, int(delta_minutes))
+            except Exception:
+                pass
+
+        if best is None or score > best[0]:
+            best = (score, fixture)
+
+    return best[1] if best else None
 
 
 def compact_h2h(rows: list[dict[str, Any]], home_team_id: str, away_team_id: str) -> list[dict[str, Any]]:

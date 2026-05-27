@@ -4,7 +4,9 @@ from types import SimpleNamespace
 from app.pipeline import build_ggbet_match_url, find_pick_market_odds
 from app.pipeline import DailyPipeline
 from app.schemas import RawFixture
+from app.services.api_football import match_ggbet_event_to_fixture
 from app.services.bookmaker_resolver import GGBetResolver, ggbet_market_matches_bet, ggbet_odd_matches_bet, ggbet_slug_candidates
+from app.services.ggbet_scraper import GGBetEvent, ggbet_event_to_odds, parse_match_page
 from app.schemas import AiPick, CandidateContext, TeamMetrics
 from app.services.render import render_daily_summary, render_pick_detail
 
@@ -98,6 +100,51 @@ def test_ggbet_bootstrap_can_join_split_env_token() -> None:
     )
 
     assert resolver._load_bootstrap_from_env()["token"] == "abc.def"
+
+
+def test_ggbet_dom_parser_extracts_over_15_match_url_and_time() -> None:
+    from zoneinfo import ZoneInfo
+
+    event = parse_match_page(
+        "https://ggbet.ua/en/sports/match/bosnia-and-herzegovina-vs-north-macedonia-29-05",
+        "21:30\nMay 29\nBosnia and Herzegovina\nNorth Macedonia\n1x2\nBosnia\n1.97\n"
+        "Total\nOver 1.5\n1.37\nUnder 1.5\n2.83\nHandicap\n-1\n2.1",
+        ZoneInfo("Europe/Kiev"),
+    )
+
+    assert event is not None
+    assert event.home_team == "Bosnia And Herzegovina"
+    assert event.away_team == "North Macedonia"
+    assert event.over15_odds == 1.37
+    assert event.start_time is not None
+    assert event.start_time.hour == 21
+
+
+def test_ggbet_event_matches_api_fixture_and_carries_odds() -> None:
+    event = GGBetEvent(
+        home_team="Fluminense FC RJ",
+        away_team="Deportivo La Guaira",
+        start_time=None,
+        url="https://ggbet.ua/en/sports/match/fluminense-fc-rj-vs-deportivo-la-guaira-28-05",
+        over15_odds=1.42,
+    )
+    fixture = RawFixture(
+        fixture_id="fixture-1",
+        date="2026-05-28T22:00:00+00:00",
+        league_name="CONMEBOL Sudamericana",
+        country="World",
+        home_team="Fluminense",
+        away_team="Deportivo La Guaira",
+    )
+
+    assert match_ggbet_event_to_fixture(event, [fixture], set()) == fixture
+    assert ggbet_event_to_odds(event) == [
+        {
+            "bookmaker": "GGBET",
+            "market": "Total",
+            "values": [{"value": "Over 1.5", "odd": "1.42"}],
+        }
+    ]
 
 
 def test_raw_fixture_filter_keeps_only_target_kyiv_date() -> None:
