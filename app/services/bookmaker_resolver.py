@@ -267,7 +267,7 @@ class GGBetResolver:
             )
         except Exception as exc:
             logger.warning("GGBET resolver failed for %s — %s: %s", home_team, away_team, exc)
-            result = ""
+            result = self._generated_fallback_url(home_team, away_team, start_time)
 
         self._cache[cache_key] = result
         return result
