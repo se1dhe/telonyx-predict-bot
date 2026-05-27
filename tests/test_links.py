@@ -1,4 +1,9 @@
+from datetime import date
+from types import SimpleNamespace
+
 from app.pipeline import build_ggbet_match_url
+from app.pipeline import DailyPipeline
+from app.schemas import RawFixture
 from app.schemas import AiPick, CandidateContext, TeamMetrics
 from app.services.render import render_daily_summary, render_pick_detail
 
@@ -12,6 +17,59 @@ def test_build_ggbet_match_url_matches_known_format() -> None:
         )
         == "https://ggbet.ua/uk-ua/sports/match/vvsb-vs-excelsior-maassluis-27-05"
     )
+
+
+def test_build_ggbet_match_url_preserves_club_abbreviations_and_aliases() -> None:
+    assert (
+        build_ggbet_match_url(
+            "Sparta Nijkerk",
+            "Ijsselmeervogels",
+            "2026-05-27T17:00:00+00:00",
+        )
+        == "https://ggbet.ua/uk-ua/sports/match/sparta-nijkerk-vs-vv-ijsselmeervogels-27-05"
+    )
+    assert (
+        build_ggbet_match_url(
+            "Velez Sarsfield Res.",
+            "Instituto Res.",
+            "2026-05-27T18:00:00+00:00",
+        )
+        == "https://ggbet.ua/uk-ua/sports/match/velez-sarsfield-res-vs-instituto-res-27-05"
+    )
+
+
+def test_raw_fixture_filter_keeps_only_target_kyiv_date() -> None:
+    pipeline = object.__new__(DailyPipeline)
+    pipeline.settings = SimpleNamespace(
+        allowed_countries=set(),
+        preferred_league_ids=[],
+        max_raw_events=20,
+        min_match_start_lead_minutes=0,
+        tz="Europe/Kiev",
+    )
+    fixtures = [
+        RawFixture(
+            fixture_id="today",
+            date="2099-05-27T18:00:00+00:00",
+            league_name="Test",
+            country="World",
+            home_team="Home",
+            away_team="Away",
+        ),
+        RawFixture(
+            fixture_id="tomorrow-local",
+            date="2099-05-27T23:00:00+00:00",
+            league_name="Test",
+            country="World",
+            home_team="Late",
+            away_team="Away",
+        ),
+    ]
+
+    filtered, stats = pipeline._filter_raw_fixtures(fixtures, date(2099, 5, 27))
+
+    assert [fixture.fixture_id for fixture in filtered] == ["today"]
+    assert stats.skipped_wrong_local_date == 1
 
 
 def test_render_uses_exact_ggbet_link_and_hides_sofascore() -> None:

@@ -340,9 +340,16 @@ def slugify_url_part(value: str) -> str:
     text = str(value or "").lower().strip()
     text = text.encode("ascii", "ignore").decode("ascii")
     text = text.replace("&", " and ")
-    text = re.sub(r"\b(fc|cf|sc|afc|ac|club|football|soccer)\b", " ", text)
+    text = re.sub(r"\b(club|football|soccer)\b", " ", text)
     text = re.sub(r"[^a-z0-9]+", "-", text)
-    return re.sub(r"-+", "-", text).strip("-") or "team"
+    slug = re.sub(r"-+", "-", text).strip("-") or "team"
+    return GGBET_TEAM_SLUG_ALIASES.get(slug, slug)
+
+
+GGBET_TEAM_SLUG_ALIASES = {
+    # GGBET keeps the Dutch club prefix for this team; API-Football usually does not.
+    "ijsselmeervogels": "vv-ijsselmeervogels",
+}
 
 
 def parse_match_datetime(value: str) -> datetime | None:

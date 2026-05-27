@@ -37,6 +37,7 @@ class FixtureFilterStats:
     skipped_status: int = 0
     skipped_time: int = 0
     skipped_no_time: int = 0
+    skipped_wrong_local_date: int = 0
     skipped_country: int = 0
     skipped_noise: int = 0
 
@@ -74,13 +75,14 @@ class DailyPipeline:
             await self._save_daily_run(date_key, summary, 0)
             return self._single_language_result(summary, [])
         debug.append(f"📦 Матчів від джерела: {len(raw_fixtures)}")
-        raw_fixtures, filter_stats = self._filter_raw_fixtures(raw_fixtures)
+        raw_fixtures, filter_stats = self._filter_raw_fixtures(raw_fixtures, target_date)
         debug.append(f"🔎 Після первинного фільтра: {len(raw_fixtures)}")
         debug.append(
             "🧮 Фільтр: "
             f"preferred={filter_stats.preferred}, fallback={filter_stats.fallback}, "
             f"status={filter_stats.skipped_status}, time={filter_stats.skipped_time}, "
-            f"no_time={filter_stats.skipped_no_time}, country={filter_stats.skipped_country}, noise={filter_stats.skipped_noise}"
+            f"no_time={filter_stats.skipped_no_time}, local_date={filter_stats.skipped_wrong_local_date}, "
+            f"country={filter_stats.skipped_country}, noise={filter_stats.skipped_noise}"
         )
         contexts: list[CandidateContext] = []
         errors, rejected = [], []
@@ -391,7 +393,7 @@ class DailyPipeline:
         )
         return result, rejected[:10]
 
-    def _filter_raw_fixtures(self, fixtures: list) -> tuple[list, FixtureFilterStats]:
+    def _filter_raw_fixtures(self, fixtures: list, target_date: date) -> tuple[list, FixtureFilterStats]:
         allowed = self.settings.allowed_countries
         preferred = set(str(x) for x in self.settings.preferred_league_ids)
         preferred_items = []
@@ -426,6 +428,9 @@ class DailyPipeline:
             if start_utc < min_start_utc:
                 stats.skipped_time += 1
                 continue
+            if fixture_local_date(start_utc, self.settings.tz) != target_date:
+                stats.skipped_wrong_local_date += 1
+                continue
             if allowed and country and country.lower() not in allowed:
                 stats.skipped_country += 1
                 continue
@@ -449,8 +454,8 @@ class DailyPipeline:
         stats.fallback = max(0, len(result) - stats.preferred)
         stats.accepted = len(result)
         logger.info(
-            "Fixture filter: total=%s accepted=%s preferred=%s fallback=%s skipped_status=%s skipped_time=%s skipped_no_time=%s skipped_country=%s skipped_noise=%s",
-            stats.total, stats.accepted, stats.preferred, stats.fallback, stats.skipped_status, stats.skipped_time, stats.skipped_no_time, stats.skipped_country, stats.skipped_noise,
+            "Fixture filter: total=%s accepted=%s preferred=%s fallback=%s skipped_status=%s skipped_time=%s skipped_no_time=%s skipped_wrong_local_date=%s skipped_country=%s skipped_noise=%s",
+            stats.total, stats.accepted, stats.preferred, stats.fallback, stats.skipped_status, stats.skipped_time, stats.skipped_no_time, stats.skipped_wrong_local_date, stats.skipped_country, stats.skipped_noise,
         )
         return result, stats
 
@@ -575,6 +580,15 @@ def parse_datetime_to_utc(raw: str) -> datetime | None:
         return None
 
 
+def fixture_local_date(start_utc: datetime, tz_name: str) -> date:
+    """Дата матча в пользовательской таймзоне, а не дата API/UTC."""
+    try:
+        target_tz = ZoneInfo(tz_name or "Europe/Kiev")
+    except Exception:
+        target_tz = ZoneInfo("Europe/Kiev")
+    return start_utc.astimezone(target_tz).date()
+
+
 def fixture_sort_key(fixture: object) -> int:
     return fixture_sort_timestamp(fixture)
 
@@ -672,9 +686,16 @@ def slugify_url_part(value: str) -> str:
     text = unicodedata.normalize("NFKD", str(value or ""))
     text = text.encode("ascii", "ignore").decode("ascii")
     text = text.lower().replace("&", " and ")
-    text = re.sub(r"\b(fc|cf|sc|afc|ac|club|football|soccer)\b", " ", text)
+    text = re.sub(r"\b(club|football|soccer)\b", " ", text)
     text = re.sub(r"[^a-z0-9]+", "-", text)
-    return re.sub(r"-+", "-", text).strip("-") or "team"
+    slug = re.sub(r"-+", "-", text).strip("-") or "team"
+    return GGBET_TEAM_SLUG_ALIASES.get(slug, slug)
+
+
+GGBET_TEAM_SLUG_ALIASES = {
+    # GGBET keeps the Dutch club prefix for this team; API-Football usually does not.
+    "ijsselmeervogels": "vv-ijsselmeervogels",
+}
 
 
 def extract_search_candidates(data: dict[str, Any]) -> list[dict[str, str]]:
