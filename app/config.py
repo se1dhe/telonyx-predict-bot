@@ -80,6 +80,7 @@ class Settings(BaseSettings):
     bookmaker_market_hint: str = Field("Шукай ринок: Total Goals / Over-Under / Тотал голов", alias="BOOKMAKER_MARKET_HINT")
     bookmaker_resolver_provider: str = Field("ggbet", alias="BOOKMAKER_RESOLVER_PROVIDER")
     ggbet_locale: str = Field("en", alias="GGBET_LOCALE")
+    ggbet_generated_fallback_enabled: bool = Field(True, alias="GGBET_GENERATED_FALLBACK_ENABLED")
     bookmaker_fallback_providers_raw: str = Field("oddschecker,betking", alias="BOOKMAKER_FALLBACK_PROVIDERS")
     bookmaker_require_exact_match: bool = Field(True, alias="BOOKMAKER_REQUIRE_EXACT_MATCH")
     bookmaker_hide_if_not_found: bool = Field(True, alias="BOOKMAKER_HIDE_IF_NOT_FOUND")

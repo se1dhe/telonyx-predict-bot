@@ -4,6 +4,7 @@ from types import SimpleNamespace
 from app.pipeline import build_ggbet_match_url, find_pick_market_odds
 from app.pipeline import DailyPipeline
 from app.schemas import RawFixture
+from app.services.bookmaker_resolver import ggbet_slug_candidates
 from app.schemas import AiPick, CandidateContext, TeamMetrics
 from app.services.render import render_daily_summary, render_pick_detail
 
@@ -36,6 +37,21 @@ def test_build_ggbet_match_url_preserves_club_abbreviations_and_aliases() -> Non
         )
         == "https://ggbet.ua/uk-ua/sports/match/velez-sarsfield-res-vs-instituto-res-27-05"
     )
+
+
+def test_ggbet_generated_fallback_candidates_use_en_slug_rules() -> None:
+    assert ggbet_slug_candidates(
+        "Crystal Palace",
+        "Rayo Vallecano",
+        "2026-05-27T19:00:00+00:00",
+        "Europe/Kiev",
+    )[0] == "crystal-palace-vs-rayo-vallecano-27-05"
+    assert ggbet_slug_candidates(
+        "Sparta Nijkerk",
+        "Ijsselmeervogels",
+        "2026-05-27T18:00:00+00:00",
+        "Europe/Kiev",
+    )[0] == "sparta-nijkerk-vs-vv-ijsselmeervogels-27-05"
 
 
 def test_raw_fixture_filter_keeps_only_target_kyiv_date() -> None:

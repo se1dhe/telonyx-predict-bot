@@ -265,7 +265,7 @@ class GGBetResolver:
     async def _resolve_inner(self, home_team: str, away_team: str, start_time: str) -> str:
         bootstrap = await self._load_bootstrap()
         if not bootstrap:
-            return ""
+            return self._generated_fallback_url(home_team, away_team, start_time)
 
         date_from, date_to = ggbet_date_window(start_time, self.settings.tz)
         search_terms = unique_items([home_team, away_team, f"{home_team} {away_team}"])
@@ -295,8 +295,15 @@ class GGBetResolver:
 
         locale = normalize_ggbet_locale(getattr(self.settings, "ggbet_locale", "en"))
         timeout = aiohttp.ClientTimeout(total=max(4, int(getattr(self.settings, "http_timeout_seconds", 12) or 12)))
+        headers = {
+            "User-Agent": (
+                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+            ),
+            "Accept-Language": "en-US,en;q=0.9,uk;q=0.8",
+        }
         html = ""
-        async with aiohttp.ClientSession(timeout=timeout) as session:
+        async with aiohttp.ClientSession(timeout=timeout, headers=headers) as session:
             for template in self.bootstrap_paths:
                 url = template.format(locale=locale)
                 async with session.get(url, allow_redirects=True) as response:
@@ -383,6 +390,16 @@ class GGBetResolver:
     def _url_for_slug(self, slug: str) -> str:
         locale = normalize_ggbet_locale(getattr(self.settings, "ggbet_locale", "en"))
         return f"https://ggbet.ua/{locale}/sports/match/{slug}"
+
+    def _generated_fallback_url(self, home_team: str, away_team: str, start_time: str) -> str:
+        if not bool(getattr(self.settings, "ggbet_generated_fallback_enabled", True)):
+            return ""
+        candidates = ggbet_slug_candidates(home_team, away_team, start_time, self.settings.tz)
+        if not candidates:
+            return ""
+        url = self._url_for_slug(candidates[0])
+        logger.warning("GGBET bootstrap unavailable; using generated fallback URL: %s", url)
+        return url
 
 def extract_candidates(data: dict[str, Any]) -> list[dict[str, str]]:
     """Достать ссылки из organic_results и sitelinks SerpAPI."""
