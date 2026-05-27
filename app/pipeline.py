@@ -2,10 +2,14 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+import unicodedata
 from dataclasses import dataclass
 from datetime import date, datetime, timezone, timedelta
 from html import escape
+from typing import Any
+from urllib.parse import urlparse
 from zoneinfo import ZoneInfo
+import aiohttp
 from sqlalchemy import select
 from app.config import get_settings
 from app.db import SessionLocal
@@ -16,7 +20,7 @@ from app.services.news_search import NewsSearchClient
 from app.services.provider_factory import get_data_provider
 from app.services.rule_based_selector import RuleBasedSelector
 from app.services.render import render_daily_summary, render_pick_detail
-from app.services.bookmaker_resolver import BookmakerResolver
+from app.services.bookmaker_resolver import BookmakerResolver, clean_url, normalize_text, teams_match
 from app.services.learning_calibrator import LearningCalibrator
 
 logger = logging.getLogger(__name__)
@@ -174,7 +178,8 @@ class DailyPipeline:
         ctx_by_id_for_sort = {c.fixture_id: c for c in contexts}
         picks.sort(key=lambda p: pick_start_sort_timestamp(p, ctx_by_id_for_sort))
 
-        await self._resolve_bookmaker_links(picks)
+        await self._resolve_tracking_links(picks, ctx_by_id_for_sort)
+        await self._resolve_bookmaker_links(picks, ctx_by_id_for_sort)
         self._log_selected_picks(picks)
         debug.append(f"✅ Вибрано матчів: {len(picks)}")
         if not picks:
@@ -228,8 +233,64 @@ class DailyPipeline:
                 return parts[0].strip(), parts[1].strip()
         return pick.match_title.strip(), ""
 
-    async def _resolve_bookmaker_links(self, picks: list[AiPick]) -> None:
-        """Утром не ищем букмекера, если включён late-refresh."""
+    async def _resolve_tracking_links(self, picks: list[AiPick], ctx_by_id: dict[str, CandidateContext]) -> None:
+        """Найти точную SofaScore-страницу матча, если SerpAPI доступен."""
+        if not self.settings.serpapi_key:
+            return
+
+        for pick in picks:
+            home, away = self._split_pick_teams(pick)
+            if not home or not away:
+                continue
+
+            url = await self._resolve_sofascore_url(home, away)
+            if url:
+                pick.tracking_url = url
+                logger.info("SofaScore exact URL set for %s: %s", pick.match_title, url)
+
+    async def _resolve_sofascore_url(self, home_team: str, away_team: str) -> str:
+        query = f'site:sofascore.com/football/match "{home_team}" "{away_team}"'
+        params = {
+            "engine": "google",
+            "q": query,
+            "api_key": self.settings.serpapi_key,
+            "num": 5,
+            "hl": "en",
+        }
+
+        try:
+            timeout = aiohttp.ClientTimeout(total=max(3, self.settings.news_timeout_seconds))
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.get("https://serpapi.com/search.json", params=params) as response:
+                    if response.status >= 400:
+                        logger.warning("SofaScore resolver HTTP %s for %s — %s", response.status, home_team, away_team)
+                        return ""
+                    data = await response.json(content_type=None)
+        except Exception as exc:
+            logger.warning("SofaScore resolver failed for %s — %s: %s", home_team, away_team, exc)
+            return ""
+
+        home_norm = normalize_text(home_team)
+        away_norm = normalize_text(away_team)
+        for candidate in extract_search_candidates(data):
+            link = clean_url(candidate.get("link", ""), ("sofascore.com",))
+            if not link:
+                continue
+
+            parsed = urlparse(link)
+            if "/football/match/" not in parsed.path:
+                continue
+
+            haystack = normalize_text(
+                " ".join([candidate.get("title", ""), candidate.get("snippet", ""), parsed.path])
+            )
+            if teams_match(haystack, home_norm, away_norm):
+                return link
+
+        return ""
+
+    async def _resolve_bookmaker_links(self, picks: list[AiPick], ctx_by_id: dict[str, CandidateContext]) -> None:
+        """Поставить точную/предсказуемую ссылку на линию букмекера."""
         if not self.settings.bookmaker_link_enabled:
             return
 
@@ -242,7 +303,16 @@ class DailyPipeline:
             if not home or not away:
                 continue
 
-            url, provider_name = await self.bookmaker.resolve(home, away)
+            ctx = ctx_by_id.get(pick.fixture_id)
+            url = ""
+            provider_name = ""
+
+            if (self.settings.bookmaker_resolver_provider or "").strip().lower() == "ggbet":
+                url = build_ggbet_match_url(home, away, ctx.start_time if ctx else "", self.settings.tz)
+                provider_name = "GGBET"
+            else:
+                url, provider_name = await self.bookmaker.resolve(home, away)
+
             pick.bookmaker_url = url
 
             if provider_name:
@@ -583,6 +653,44 @@ def format_bookmaker_odds(value: float | None) -> str:
     if value is None:
         return ""
     return f"{float(value):.2f}"
+
+
+def build_ggbet_match_url(home_team: str, away_team: str, start_time: str, tz_name: str = "Europe/Kiev") -> str:
+    """Собрать match-level URL GGBET: /sports/match/home-vs-away-dd-mm."""
+    slug = f"{slugify_url_part(home_team)}-vs-{slugify_url_part(away_team)}"
+    match_date = parse_datetime_to_utc(str(start_time or ""))
+    if match_date:
+        try:
+            match_date = match_date.astimezone(ZoneInfo(tz_name or "Europe/Kiev"))
+        except Exception:
+            match_date = match_date.astimezone(ZoneInfo("Europe/Kiev"))
+        slug = f"{slug}-{match_date.strftime('%d-%m')}"
+
+    return f"https://ggbet.ua/uk-ua/sports/match/{slug}"
+
+
+def slugify_url_part(value: str) -> str:
+    text = unicodedata.normalize("NFKD", str(value or ""))
+    text = text.encode("ascii", "ignore").decode("ascii")
+    text = text.lower().replace("&", " and ")
+    text = re.sub(r"\b(fc|cf|sc|afc|ac|club|football|soccer)\b", " ", text)
+    text = re.sub(r"[^a-z0-9]+", "-", text)
+    return re.sub(r"-+", "-", text).strip("-") or "team"
+
+
+def extract_search_candidates(data: dict[str, Any]) -> list[dict[str, str]]:
+    result: list[dict[str, str]] = []
+    for row in data.get("organic_results", []) or []:
+        link = str(row.get("link") or "")
+        if link:
+            result.append(
+                {
+                    "link": link,
+                    "title": str(row.get("title") or ""),
+                    "snippet": str(row.get("snippet") or ""),
+                }
+            )
+    return result
 
 
 def split_match_title(title: str) -> tuple[str, str]:
