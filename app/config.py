@@ -79,6 +79,7 @@ class Settings(BaseSettings):
     bookmaker_backup_links: str = Field("", alias="BOOKMAKER_BACKUP_LINKS")
     bookmaker_market_hint: str = Field("Шукай ринок: Total Goals / Over-Under / Тотал голов", alias="BOOKMAKER_MARKET_HINT")
     bookmaker_resolver_provider: str = Field("ggbet", alias="BOOKMAKER_RESOLVER_PROVIDER")
+    ggbet_locale: str = Field("en", alias="GGBET_LOCALE")
     bookmaker_fallback_providers_raw: str = Field("oddschecker,betking", alias="BOOKMAKER_FALLBACK_PROVIDERS")
     bookmaker_require_exact_match: bool = Field(True, alias="BOOKMAKER_REQUIRE_EXACT_MATCH")
     bookmaker_hide_if_not_found: bool = Field(True, alias="BOOKMAKER_HIDE_IF_NOT_FOUND")
@@ -106,12 +107,12 @@ class Settings(BaseSettings):
     min_pick_odds_require_available: bool = Field(True, alias="MIN_PICK_ODDS_REQUIRE_AVAILABLE")
     odds_first_enabled: bool = Field(True, alias="ODDS_FIRST_ENABLED")
     odds_first_bookmaker_id: str = Field("", alias="ODDS_FIRST_BOOKMAKER_ID")
-    odds_first_bet_ids_raw: str = Field("", alias="ODDS_FIRST_BET_IDS")
+    odds_first_bet_ids_raw: str = Field("5", alias="ODDS_FIRST_BET_IDS")
 
     # Safe-mode и самообучение: жестко режем слабые рынки и учитываем историю закрытых прогнозов.
     safe_mode_enabled: bool = Field(True, alias="SAFE_MODE_ENABLED")
     safe_mode_allowed_bets_raw: str = Field(
-        "OVER_1_5,HOME_DOUBLE_CHANCE,AWAY_DOUBLE_CHANCE,HOME_DNB,AWAY_DNB",
+        "OVER_1_5",
         alias="SAFE_MODE_ALLOWED_BETS",
     )
     safe_mode_disallowed_bet_penalty: int = Field(18, alias="SAFE_MODE_DISALLOWED_BET_PENALTY")

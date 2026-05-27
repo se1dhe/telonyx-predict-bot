@@ -295,9 +295,6 @@ def bookmaker_link_line(match_title: str, bookmaker_url: str = "", lang: str = "
     name = bookmaker_name or settings.bookmaker_name or "bookmaker"
     url = str(bookmaker_url or "").strip()
 
-    if not url and (name or "").strip().lower() == "ggbet":
-        url = build_ggbet_match_url_from_title(match_title, match_time)
-
     if not url:
         return ""
 

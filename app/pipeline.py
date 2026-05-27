@@ -295,7 +295,8 @@ class DailyPipeline:
         if not self.settings.bookmaker_link_enabled:
             return
 
-        if getattr(self.settings, "bookmaker_late_refresh_enabled", True):
+        resolver_provider = (self.settings.bookmaker_resolver_provider or "").strip().lower()
+        if getattr(self.settings, "bookmaker_late_refresh_enabled", True) and resolver_provider != "ggbet":
             logger.info("Bookmaker resolving deferred until late refresh window")
             return
 
@@ -308,11 +309,7 @@ class DailyPipeline:
             url = ""
             provider_name = ""
 
-            if (self.settings.bookmaker_resolver_provider or "").strip().lower() == "ggbet":
-                url = build_ggbet_match_url(home, away, ctx.start_time if ctx else "", self.settings.tz)
-                provider_name = "GGBET"
-            else:
-                url, provider_name = await self.bookmaker.resolve(home, away)
+            url, provider_name = await self.bookmaker.resolve(home, away, ctx.start_time if ctx else "")
 
             pick.bookmaker_url = url
 
@@ -607,6 +604,7 @@ def find_pick_market_odds(pick: AiPick, ctx: CandidateContext | None) -> float |
     if not ctx or not ctx.odds:
         return None
 
+    best_odd: float | None = None
     for offer in ctx.odds:
         if not isinstance(offer, dict):
             continue
@@ -624,9 +622,10 @@ def find_pick_market_odds(pick: AiPick, ctx: CandidateContext | None) -> float |
             if odd is None:
                 continue
             if odds_value_matches_pick(pick, ctx, market, label):
-                return odd
+                if best_odd is None or odd > best_odd:
+                    best_odd = odd
 
-    return None
+    return best_odd
 
 
 def odds_value_matches_pick(pick: AiPick, ctx: CandidateContext, market: str, label: str) -> bool:

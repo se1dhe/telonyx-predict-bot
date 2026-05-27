@@ -70,7 +70,11 @@ class BookmakerPostUpdater:
             updated = 0
             for prediction in due:
                 prediction.bookmaker_checked_at = datetime.utcnow()
-                url, provider_name = await self.resolver.resolve(prediction.home_team, prediction.away_team)
+                url, provider_name = await self.resolver.resolve(
+                    prediction.home_team,
+                    prediction.away_team,
+                    prediction.start_time,
+                )
                 if not url:
                     logger.info(
                         "Late bookmaker refresh: exact URL not found for %s — %s",
