@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import re
 from datetime import datetime, timezone
-from urllib.parse import quote_plus
 from zoneinfo import ZoneInfo
 
 from app.config import get_settings
@@ -296,9 +295,6 @@ def bookmaker_link_line(match_title: str, bookmaker_url: str = "", lang: str = "
     name = bookmaker_name or settings.bookmaker_name or "bookmaker"
     url = str(bookmaker_url or "").strip()
 
-    if not url and settings.bookmaker_search_url_template:
-        url = settings.bookmaker_search_url_template.format(query=quote_plus(match_title))
-
     if not url:
         return ""
 
@@ -372,9 +368,6 @@ def render_daily_summary(
         if odds_line:
             lines.append(odds_line)
 
-        if p.tracking_url:
-            lines.append(f'🔗 <a href="{html_escape(p.tracking_url)}">{L(lang, "open_match")}</a>')
-
         line = bookmaker_link_line(p.match_title, p.bookmaker_url, lang, p.bookmaker_name, p.bookmaker_odds)
         if line:
             lines.append(line)
@@ -427,12 +420,9 @@ def render_pick_detail(p: AiPick, ctx: CandidateContext | None = None, lang: str
         f"{L(lang, 'analysis')}\n{html_escape(generated_analysis(p, ctx, lang))}{data_block}",
     ]
 
-    if p.tracking_url:
-        lines.append("")
-        lines.append(f'🔗 <a href="{html_escape(p.tracking_url)}">{L(lang, "open_match")}</a>')
-
     line = bookmaker_link_line(p.match_title, p.bookmaker_url, lang, p.bookmaker_name, p.bookmaker_odds)
     if line:
+        lines.append("")
         lines.append(line)
 
     lines.append("")

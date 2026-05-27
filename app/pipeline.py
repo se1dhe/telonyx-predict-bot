@@ -178,7 +178,6 @@ class DailyPipeline:
         ctx_by_id_for_sort = {c.fixture_id: c for c in contexts}
         picks.sort(key=lambda p: pick_start_sort_timestamp(p, ctx_by_id_for_sort))
 
-        await self._resolve_tracking_links(picks, ctx_by_id_for_sort)
         await self._resolve_bookmaker_links(picks, ctx_by_id_for_sort)
         self._log_selected_picks(picks)
         debug.append(f"✅ Вибрано матчів: {len(picks)}")
