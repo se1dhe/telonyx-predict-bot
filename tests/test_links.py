@@ -4,7 +4,7 @@ from types import SimpleNamespace
 from app.pipeline import build_ggbet_match_url, find_pick_market_odds
 from app.pipeline import DailyPipeline
 from app.schemas import RawFixture
-from app.services.bookmaker_resolver import ggbet_market_matches_bet, ggbet_odd_matches_bet, ggbet_slug_candidates
+from app.services.bookmaker_resolver import GGBetResolver, ggbet_market_matches_bet, ggbet_odd_matches_bet, ggbet_slug_candidates
 from app.schemas import AiPick, CandidateContext, TeamMetrics
 from app.services.render import render_daily_summary, render_pick_detail
 
@@ -64,6 +64,25 @@ def test_ggbet_total_over_15_market_mapping() -> None:
 
     assert ggbet_market_matches_bet(market, "OVER_1_5")
     assert ggbet_odd_matches_bet(market["odds"][0], "OVER_1_5")
+
+
+def test_ggbet_bootstrap_can_use_env_graphql_settings() -> None:
+    resolver = object.__new__(GGBetResolver)
+    resolver.settings = SimpleNamespace(
+        ggbet_graphql_endpoint="//gg-b-gql.ggbet.ua",
+        ggbet_graphql_token="token",
+        ggbet_graphql_app_id="22",
+        ggbet_graphql_access_token="access",
+        ggbet_locale="en",
+    )
+
+    assert resolver._load_bootstrap_from_env() == {
+        "endpoint": "https://gg-b-gql.ggbet.ua/graphql",
+        "token": "token",
+        "app_id": "22",
+        "access_token": "access",
+        "locale": "en",
+    }
 
 
 def test_raw_fixture_filter_keeps_only_target_kyiv_date() -> None:

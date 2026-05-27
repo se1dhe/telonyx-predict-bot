@@ -303,6 +303,11 @@ class GGBetResolver:
         if self._bootstrap:
             return self._bootstrap
 
+        env_bootstrap = self._load_bootstrap_from_env()
+        if env_bootstrap:
+            self._bootstrap = env_bootstrap
+            return self._bootstrap
+
         locale = normalize_ggbet_locale(getattr(self.settings, "ggbet_locale", "en"))
         timeout = aiohttp.ClientTimeout(total=max(4, int(getattr(self.settings, "http_timeout_seconds", 12) or 12)))
         headers = {
@@ -354,6 +359,26 @@ class GGBetResolver:
             "locale": locale,
         }
         return self._bootstrap
+
+    def _load_bootstrap_from_env(self) -> dict[str, str]:
+        endpoint = str(getattr(self.settings, "ggbet_graphql_endpoint", "") or "").strip()
+        token = str(getattr(self.settings, "ggbet_graphql_token", "") or "").strip()
+        app_id = str(getattr(self.settings, "ggbet_graphql_app_id", "") or "").strip()
+        access_token = str(getattr(self.settings, "ggbet_graphql_access_token", "") or "").strip()
+        locale = normalize_ggbet_locale(getattr(self.settings, "ggbet_locale", "en"))
+        if not endpoint or not token or not app_id or not access_token:
+            return {}
+        if endpoint.startswith("//"):
+            endpoint = f"https:{endpoint}"
+        if not endpoint.endswith("/graphql"):
+            endpoint = endpoint.rstrip("/") + "/graphql"
+        return {
+            "endpoint": endpoint,
+            "token": token,
+            "app_id": app_id,
+            "access_token": access_token,
+            "locale": locale,
+        }
 
     async def _graphql(self, bootstrap: dict[str, str], query: str, variables: dict[str, Any]) -> dict[str, Any]:
         headers = {
