@@ -82,6 +82,8 @@ class Settings(BaseSettings):
     ggbet_locale: str = Field("en", alias="GGBET_LOCALE")
     ggbet_graphql_endpoint: str = Field("", alias="GGBET_GRAPHQL_ENDPOINT")
     ggbet_graphql_token: str = Field("", alias="GGBET_GRAPHQL_TOKEN")
+    ggbet_graphql_token_part_1: str = Field("", alias="GGBET_GRAPHQL_TOKEN_PART_1")
+    ggbet_graphql_token_part_2: str = Field("", alias="GGBET_GRAPHQL_TOKEN_PART_2")
     ggbet_graphql_app_id: str = Field("", alias="GGBET_GRAPHQL_APP_ID")
     ggbet_graphql_access_token: str = Field("", alias="GGBET_GRAPHQL_ACCESS_TOKEN")
     ggbet_generated_fallback_enabled: bool = Field(True, alias="GGBET_GENERATED_FALLBACK_ENABLED")

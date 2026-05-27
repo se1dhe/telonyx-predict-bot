@@ -363,6 +363,11 @@ class GGBetResolver:
     def _load_bootstrap_from_env(self) -> dict[str, str]:
         endpoint = str(getattr(self.settings, "ggbet_graphql_endpoint", "") or "").strip()
         token = str(getattr(self.settings, "ggbet_graphql_token", "") or "").strip()
+        if not token:
+            token = (
+                str(getattr(self.settings, "ggbet_graphql_token_part_1", "") or "").strip()
+                + str(getattr(self.settings, "ggbet_graphql_token_part_2", "") or "").strip()
+            )
         app_id = str(getattr(self.settings, "ggbet_graphql_app_id", "") or "").strip()
         access_token = str(getattr(self.settings, "ggbet_graphql_access_token", "") or "").strip()
         locale = normalize_ggbet_locale(getattr(self.settings, "ggbet_locale", "en"))

@@ -85,6 +85,21 @@ def test_ggbet_bootstrap_can_use_env_graphql_settings() -> None:
     }
 
 
+def test_ggbet_bootstrap_can_join_split_env_token() -> None:
+    resolver = object.__new__(GGBetResolver)
+    resolver.settings = SimpleNamespace(
+        ggbet_graphql_endpoint="https://gg-b-gql.ggbet.ua/graphql",
+        ggbet_graphql_token="",
+        ggbet_graphql_token_part_1="abc.",
+        ggbet_graphql_token_part_2="def",
+        ggbet_graphql_app_id="22",
+        ggbet_graphql_access_token="access",
+        ggbet_locale="en",
+    )
+
+    assert resolver._load_bootstrap_from_env()["token"] == "abc.def"
+
+
 def test_raw_fixture_filter_keeps_only_target_kyiv_date() -> None:
     pipeline = object.__new__(DailyPipeline)
     pipeline.settings = SimpleNamespace(
