@@ -306,7 +306,9 @@ def bookmaker_odds_line(p: AiPick, lang: str) -> str:
     if not p.bookmaker_odds:
         return ""
     odds = f"{float(p.bookmaker_odds):.2f}" if p.bookmaker_odds else "—"
-    return f"{L(lang, 'bookmaker_odds')} {html_escape(odds)}"
+    bookmaker = str(p.bookmaker_name or "").strip()
+    value = f"{bookmaker} — {odds}" if bookmaker else odds
+    return f"{L(lang, 'bookmaker_odds')} {html_escape(value)}"
 
 
 def build_ggbet_match_url_from_title(match_title: str, match_time: str = "") -> str:

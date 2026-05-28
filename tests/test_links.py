@@ -245,6 +245,7 @@ def test_render_hides_ggbet_link_when_pick_url_is_empty() -> None:
     text = render_daily_summary([pick], [], contexts_by_id={"1": ctx}, lang="uk")
 
     assert "ggbet.ua" not in text
+    assert "Кеф / лінія:</b> GGBET — 1.45" in text
 
 
 def test_render_hides_missing_bookmaker_odds() -> None:
