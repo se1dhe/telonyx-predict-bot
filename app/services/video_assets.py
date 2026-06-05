@@ -19,7 +19,7 @@ import aiohttp
 from app.config import Settings, get_settings
 from app.models import Prediction
 from app.schemas import AiPick
-from app.services.render import bet_name, simple_bet_name
+from app.services.render import bet_name, simple_bet_name, ukrainian_to_russian_text
 
 
 logger = logging.getLogger(__name__)
@@ -277,7 +277,7 @@ async def render_vertical_video(
     title_ru = russian_video_text(title)
     main_bet = bet_name(pick, "ru") if pick else simple_bet_name(prediction.main_bet_label or prediction.main_bet_code, "ru")
     confidence = str(pick.confidence if pick else prediction.confidence)
-    why = compact_text(russian_video_text((pick.why_this_match_is_gold if pick else "") or prediction.rendered_text), 150)
+    why = compact_text(russian_video_text((pick.why_this_match_is_gold if pick else "") or prediction.rendered_text), 105)
     time_text = format_start_time(prediction.start_time)
     odds = prediction.bookmaker_odds or (f"{pick.bookmaker_odds:.2f}" if pick and pick.bookmaker_odds else "")
     bookmaker = prediction.bookmaker_name or (pick.bookmaker_name if pick else "") or settings.bookmaker_name
@@ -307,7 +307,7 @@ async def render_vertical_video(
     filters.extend(draw_text_block(font_file, main_bet.upper(), scale_font(43, width), pad, pick_y + scale_font(46, width), "white", 20, 2, line_gap=10, start=2.9))
     filters.extend(draw_text_block(font_file, f"УВЕРЕННОСТЬ {confidence}/100", scale_font(34, width), pad, height // 2 + 20, "0x32d583", 26, 1, start=5.2))
     filters.extend(draw_text_block(font_file, f"{bookmaker} {odds}".strip(), scale_font(28, width), pad, height // 2 + 82, "0xfed766", 26, 1, start=5.6))
-    filters.extend(draw_text_block(font_file, why, scale_font(29, width), pad, height // 2 + 175, "white", 29, 4, line_gap=9, start=7.0))
+    filters.extend(draw_text_block(font_file, why, scale_font(26, width), pad, height // 2 + 170, "white", 25, 4, line_gap=8, start=7.0))
     filters.extend(draw_text_block(font_file, time_text, scale_font(24, width), pad, height - 205, "0xb8c4d9", 28, 1, start=10.0))
     filters.extend(draw_text_block(font_file, "ПОЛНЫЙ РАЗБОР В ТЕЛЕГРАМЕ", scale_font(27, width), pad, height - 132, "0x32d583", 29, 1, start=11.0))
     filters.append(f"fade=t=out:st={duration - 0.7}:d=0.7")
@@ -447,60 +447,7 @@ def build_video_caption(prediction: Prediction, pick: AiPick | None) -> str:
 
 def russian_video_text(value: str) -> str:
     """Normalize common Ukrainian AI phrases so generated videos stay Russian-only."""
-    text = str(value or "")
-    replacements = {
-        "Болгарія": "Болгария",
-        "Молдова пропускає": "Молдова пропускает",
-        "Азербайджан виглядає": "Азербайджан выглядит",
-        "Болгарія виглядає": "Болгария выглядит",
-        "Обидві команди": "Обе команды",
-        "обидві команди": "обе команды",
-        "виглядає": "выглядит",
-        "сильнішою": "сильнее",
-        "фаворитом": "фаворитом",
-        "але результат ризиковий": "но результат рискованный",
-        "можуть забити": "могут забить",
-        "краще через тотал": "лучше через тотал",
-        "але": "но",
-        "Висока ймовірність": "Высокая вероятность",
-        "висока ймовірність": "высокая вероятность",
-        "тоталу більше": "тотала больше",
-        "тотал більше": "тотал больше",
-        "через слабку оборону": "из-за слабой обороны",
-        "слабку оборону": "слабую оборону",
-        "та схильність": "и склонность",
-        "схильність": "склонность",
-        "Молдови": "Молдовы",
-        "обох команд": "обеих команд",
-        "до результативних матчів": "к результативным матчам",
-        "демонструють": "показывают",
-        "високу результативність": "высокую результативность",
-        "у своїх останніх матчах": "в своих последних матчах",
-        "часто пробиваючи": "часто пробивая",
-        "у середньому": "в среднем",
-        "понад": "больше",
-        "голи": "голы",
-        "голів": "голов",
-        "матчів": "матчей",
-        "ігор": "игр",
-        "всі": "все",
-        "останніх": "последних",
-        "завершилися": "завершились",
-        "також": "тоже",
-        "результативні": "результативные",
-        "забиваючи та пропускаючи": "забивая и пропуская",
-        "товариський матч": "товарищеский матч",
-        "статистика голів": "статистика голов",
-        "дуже переконлива": "очень убедительная",
-        "мають": "имеют",
-        "схожу статистику": "похожую статистику",
-        "регулярно пропускають": "регулярно пропускают",
-        "грають матчі": "играют матчи",
-        "тенденція до голів очевидна": "тенденция к голам очевидна",
-    }
-    for source, target in replacements.items():
-        text = text.replace(source, target)
-    return text
+    return ukrainian_to_russian_text(value)
 
 
 def match_title(prediction: Prediction, pick: AiPick | None) -> str:

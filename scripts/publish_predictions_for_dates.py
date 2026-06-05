@@ -196,6 +196,15 @@ async def publish_date(bot: Bot, target_date: date, clear: bool, send: bool, edi
 
     for lang in settings.active_public_languages:
         public_chat = settings.public_channel_for(lang)
+        private_chat = settings.private_channel_for(lang)
+        if public_chat and private_chat and str(public_chat).strip() == str(private_chat).strip():
+            logger.warning(
+                "Public post skipped for lang=%s because public and private destinations are identical: %s",
+                lang,
+                public_chat,
+            )
+            continue
+
         summary = _get_lang_text(summaries, lang)
         details = _get_lang_details(details_by_lang, lang)
 

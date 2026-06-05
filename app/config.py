@@ -83,7 +83,7 @@ class Settings(BaseSettings):
     video_assets_tts_model: str = Field("gemini-2.5-flash-preview-tts", alias="VIDEO_ASSETS_TTS_MODEL")
     video_assets_tts_voice: str = Field("Kore", alias="VIDEO_ASSETS_TTS_VOICE")
     video_assets_tts_cache_dir: str = Field("./data/video_assets/voice_cache", alias="VIDEO_ASSETS_TTS_CACHE_DIR")
-    video_assets_tts_fallback_voice: str = Field("ru-RU-DmitryNeural", alias="VIDEO_ASSETS_TTS_FALLBACK_VOICE")
+    video_assets_tts_fallback_voice: str = Field("ru-RU-SvetlanaNeural", alias="VIDEO_ASSETS_TTS_FALLBACK_VOICE")
     video_assets_tts_instructions: str = Field(
         "Говори только по-русски, энергично, уверенно и короткими фразами, как спортивный аналитик для коротких видео.",
         alias="VIDEO_ASSETS_TTS_INSTRUCTIONS",

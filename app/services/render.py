@@ -154,8 +154,85 @@ def compact_reason(text: str, limit: int = 700) -> str:
 
 
 def localize_free_text(text: str, lang: str) -> str:
-    """Оставить произвольный текст как есть, но безопасно для HTML."""
-    return str(text or "").strip()
+    """Normalize free-form AI text for the target language."""
+    value = str(text or "").strip()
+    if normalize_lang(lang) == "ru":
+        return ukrainian_to_russian_text(value)
+    return value
+
+
+def ukrainian_to_russian_text(value: str) -> str:
+    """Translate the common Ukrainian fragments Gemini returns in betting explanations."""
+    text = str(value or "")
+    replacements = {
+        "Болгарія": "Болгария",
+        "Молдови": "Молдовы",
+        "Азербайджан має": "Азербайджан имеет",
+        "Мальта також має": "Мальта тоже имеет",
+        "має": "имеет",
+        "мають": "имеют",
+        "виглядає": "выглядит",
+        "сильнішою": "сильнее",
+        "результат ризиковий": "результат рискованный",
+        "Обидві команди": "Обе команды",
+        "обидві команди": "обе команды",
+        "обидві можуть забити": "обе могут забить",
+        "можуть забити": "могут забить",
+        "краще через тотал": "лучше через тотал",
+        "але": "но",
+        "Хоча": "Хотя",
+        "хоча": "хотя",
+        "очні зустрічі": "очные встречи",
+        "були менш результативними": "были менее результативными",
+        "поточна форма команд вказує": "текущая форма команд указывает",
+        "потенціал для голів": "потенциал для голов",
+        "Висока ймовірність": "Высокая вероятность",
+        "висока ймовірність": "высокая вероятность",
+        "тоталу більше": "тотала больше",
+        "тотал більше": "тотал больше",
+        "через слабку оборону": "из-за слабой обороны",
+        "слабку оборону": "слабую оборону",
+        "та схильність": "и склонность",
+        "схильність": "склонность",
+        "обох команд": "обеих команд",
+        "до результативних матчів": "к результативным матчам",
+        "демонструють": "показывают",
+        "високу результативність": "высокую результативность",
+        "в останніх матчах": "в последних матчах",
+        "у своїх останніх матчах": "в своих последних матчах",
+        "часто пробиваючи": "часто пробивая",
+        "забиваючи": "забивая",
+        "пропускаючи": "пропуская",
+        "у середньому": "в среднем",
+        "в середньому": "в среднем",
+        " з ": " из ",
+        "з тоталом більше": "с тоталом больше",
+        "більше": "больше",
+        " та ": " и ",
+        "за гру": "за игру",
+        "понад": "больше",
+        "голи": "голы",
+        "голів": "голов",
+        "матчів": "матчей",
+        "ігор": "игр",
+        "всі": "все",
+        "останніх": "последних",
+        "завершилися": "завершились",
+        "також": "тоже",
+        "результативні": "результативные",
+        "забиваючи та пропускаючи": "забивая и пропуская",
+        "товариський матч": "товарищеский матч",
+        "статистика голів": "статистика голов",
+        "дуже переконлива": "очень убедительная",
+        "схожу статистику": "похожую статистику",
+        "регулярно пропускають": "регулярно пропускают",
+        "грають матчі": "играют матчи",
+        "тенденція до голів очевидна": "тенденция к голам очевидна",
+    }
+    for source, target in replacements.items():
+        text = text.replace(source, target)
+    text = text.replace("ис тоталом", "с тоталом")
+    return text
 
 
 def format_match_time(ctx: CandidateContext | None, lang: str = "uk") -> str:
@@ -364,7 +441,7 @@ def parse_match_datetime(value: str) -> datetime | None:
 
 def generated_why(p: AiPick, ctx: CandidateContext | None, lang: str) -> str:
     if p.why_this_match_is_gold:
-        return compact_reason(p.why_this_match_is_gold, 520)
+        return compact_reason(localize_free_text(p.why_this_match_is_gold, lang), 520)
 
     lang = normalize_lang(lang)
     return {
@@ -376,7 +453,7 @@ def generated_why(p: AiPick, ctx: CandidateContext | None, lang: str) -> str:
 
 def generated_analysis(p: AiPick, ctx: CandidateContext | None, lang: str) -> str:
     if p.reasoning:
-        return compact_reason(p.reasoning, 900)
+        return compact_reason(localize_free_text(p.reasoning, lang), 900)
 
     lang = normalize_lang(lang)
     return {
@@ -410,7 +487,7 @@ def render_daily_summary(
 
     for idx, p in enumerate(picks, start=1):
         lines.extend([
-            f"{idx}. <b>{html_escape(p.match_title)}</b>",
+            f"{idx}. <b>{html_escape(localize_free_text(p.match_title, lang))}</b>",
             f"{L(lang, 'bet')} {html_escape(bet_name(p, lang))}",
             f"{L(lang, 'confidence')} {p.confidence}/100 ({confidence_text(p.confidence, lang)})",
             f"{risk_emoji(p.risk_level)} {L(lang, 'risk')} {RISK[lang][risk_key(p.risk_level)]}",
@@ -459,7 +536,7 @@ def render_pick_detail(p: AiPick, ctx: CandidateContext | None = None, lang: str
         )
 
     lines = [
-        f"⚽️ <b>{html_escape(p.match_title)}</b>",
+        f"⚽️ <b>{html_escape(localize_free_text(p.match_title, lang))}</b>",
         f"{L(lang, 'date_time')} {html_escape(match_time)}",
         f"{L(lang, 'league')} {html_escape(league)}",
         "",
