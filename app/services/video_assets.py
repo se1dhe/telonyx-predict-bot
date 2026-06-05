@@ -274,9 +274,10 @@ async def render_vertical_video(
     duration = max(18, min(90, duration))
 
     title = match_title(prediction, pick)
+    title_ru = russian_video_text(title)
     main_bet = bet_name(pick, "ru") if pick else simple_bet_name(prediction.main_bet_label or prediction.main_bet_code, "ru")
     confidence = str(pick.confidence if pick else prediction.confidence)
-    why = compact_text((pick.why_this_match_is_gold if pick else "") or prediction.rendered_text, 150)
+    why = compact_text(russian_video_text((pick.why_this_match_is_gold if pick else "") or prediction.rendered_text), 150)
     time_text = format_start_time(prediction.start_time)
     odds = prediction.bookmaker_odds or (f"{pick.bookmaker_odds:.2f}" if pick and pick.bookmaker_odds else "")
     bookmaker = prediction.bookmaker_name or (pick.bookmaker_name if pick else "") or settings.bookmaker_name
@@ -301,7 +302,7 @@ async def render_vertical_video(
             "fade=t=in:st=0:d=0.45",
         ]
     )
-    filters.extend(draw_text_block(font_file, title.upper(), scale_font(50, width), pad, title_y, "white", 18, 3, line_gap=12, start=0.35))
+    filters.extend(draw_text_block(font_file, title_ru.upper(), scale_font(50, width), pad, title_y, "white", 18, 3, line_gap=12, start=0.35))
     filters.extend(draw_text_block(font_file, "ОСНОВНАЯ СТАВКА", scale_font(25, width), pad, pick_y, "0x8ab4ff", 28, 1, start=2.5))
     filters.extend(draw_text_block(font_file, main_bet.upper(), scale_font(43, width), pad, pick_y + scale_font(46, width), "white", 20, 2, line_gap=10, start=2.9))
     filters.extend(draw_text_block(font_file, f"УВЕРЕННОСТЬ {confidence}/100", scale_font(34, width), pad, height // 2 + 20, "0x32d583", 26, 1, start=5.2))
@@ -398,11 +399,11 @@ def probe_audio_duration(audio_path: Path, ffmpeg_path: str) -> float:
 
 
 def build_voiceover_text(prediction: Prediction, pick: AiPick | None) -> str:
-    title = match_title(prediction, pick)
+    title = russian_video_text(match_title(prediction, pick))
     main_bet = bet_name(pick, "ru") if pick else simple_bet_name(prediction.main_bet_label or prediction.main_bet_code, "ru")
     confidence = pick.confidence if pick else prediction.confidence
     bookmaker = prediction.bookmaker_name or (pick.bookmaker_name if pick else "") or get_settings().bookmaker_name
-    reasoning = compact_text((pick.reasoning if pick else "") or prediction.rendered_text, 360)
+    reasoning = compact_text(russian_video_text((pick.reasoning if pick else "") or prediction.rendered_text), 360)
 
     return (
         f"Нейросеть разобрала матч {title}. "
@@ -416,7 +417,7 @@ def build_voiceover_text(prediction: Prediction, pick: AiPick | None) -> str:
 
 
 def build_video_caption(prediction: Prediction, pick: AiPick | None) -> str:
-    title = match_title(prediction, pick)
+    title = russian_video_text(match_title(prediction, pick))
     main_bet = bet_name(pick, "ru") if pick else simple_bet_name(prediction.main_bet_label or prediction.main_bet_code, "ru")
     confidence = pick.confidence if pick else prediction.confidence
     bookmaker = prediction.bookmaker_name or (pick.bookmaker_name if pick else "") or get_settings().bookmaker_name
@@ -442,6 +443,64 @@ def build_video_caption(prediction: Prediction, pick: AiPick | None) -> str:
             hashtags,
         ]
     )
+
+
+def russian_video_text(value: str) -> str:
+    """Normalize common Ukrainian AI phrases so generated videos stay Russian-only."""
+    text = str(value or "")
+    replacements = {
+        "Болгарія": "Болгария",
+        "Молдова пропускає": "Молдова пропускает",
+        "Азербайджан виглядає": "Азербайджан выглядит",
+        "Болгарія виглядає": "Болгария выглядит",
+        "Обидві команди": "Обе команды",
+        "обидві команди": "обе команды",
+        "виглядає": "выглядит",
+        "сильнішою": "сильнее",
+        "фаворитом": "фаворитом",
+        "але результат ризиковий": "но результат рискованный",
+        "можуть забити": "могут забить",
+        "краще через тотал": "лучше через тотал",
+        "але": "но",
+        "Висока ймовірність": "Высокая вероятность",
+        "висока ймовірність": "высокая вероятность",
+        "тоталу більше": "тотала больше",
+        "тотал більше": "тотал больше",
+        "через слабку оборону": "из-за слабой обороны",
+        "слабку оборону": "слабую оборону",
+        "та схильність": "и склонность",
+        "схильність": "склонность",
+        "Молдови": "Молдовы",
+        "обох команд": "обеих команд",
+        "до результативних матчів": "к результативным матчам",
+        "демонструють": "показывают",
+        "високу результативність": "высокую результативность",
+        "у своїх останніх матчах": "в своих последних матчах",
+        "часто пробиваючи": "часто пробивая",
+        "у середньому": "в среднем",
+        "понад": "больше",
+        "голи": "голы",
+        "голів": "голов",
+        "матчів": "матчей",
+        "ігор": "игр",
+        "всі": "все",
+        "останніх": "последних",
+        "завершилися": "завершились",
+        "також": "тоже",
+        "результативні": "результативные",
+        "забиваючи та пропускаючи": "забивая и пропуская",
+        "товариський матч": "товарищеский матч",
+        "статистика голів": "статистика голов",
+        "дуже переконлива": "очень убедительная",
+        "мають": "имеют",
+        "схожу статистику": "похожую статистику",
+        "регулярно пропускають": "регулярно пропускают",
+        "грають матчі": "играют матчи",
+        "тенденція до голів очевидна": "тенденция к голам очевидна",
+    }
+    for source, target in replacements.items():
+        text = text.replace(source, target)
+    return text
 
 
 def match_title(prediction: Prediction, pick: AiPick | None) -> str:
