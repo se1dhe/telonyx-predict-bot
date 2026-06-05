@@ -419,7 +419,29 @@ def build_video_caption(prediction: Prediction, pick: AiPick | None) -> str:
     title = match_title(prediction, pick)
     main_bet = bet_name(pick, "ru") if pick else simple_bet_name(prediction.main_bet_label or prediction.main_bet_code, "ru")
     confidence = pick.confidence if pick else prediction.confidence
-    return f"🎥 Видео для короткого формата\n⚽️ {title}\n🎯 {main_bet}\nУверенность нейросети: {confidence}/100"
+    bookmaker = prediction.bookmaker_name or (pick.bookmaker_name if pick else "") or get_settings().bookmaker_name
+    odds = prediction.bookmaker_odds or (f"{pick.bookmaker_odds:.2f}" if pick and pick.bookmaker_odds else "")
+    odds_text = f" Коэффициент: {odds}." if odds else ""
+    short_description = (
+        f"Нейросеть разобрала матч {title}. "
+        f"Основная ставка: {main_bet}. "
+        f"Уверенность модели: {confidence}/100.{odds_text} "
+        f"Полный разбор и ссылка на линию {bookmaker} в Телеграме."
+    )
+    hashtags = "#ставки #футбол #прогноз #спорт #беттинг #телеграм"
+
+    return "\n".join(
+        [
+            "Что вставить в ТикТок:",
+            short_description,
+            hashtags,
+            "",
+            "Что вставить в Ютуб Шортс:",
+            f"{title} | прогноз нейросети",
+            short_description,
+            hashtags,
+        ]
+    )
 
 
 def match_title(prediction: Prediction, pick: AiPick | None) -> str:
