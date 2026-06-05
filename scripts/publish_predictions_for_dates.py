@@ -20,6 +20,7 @@ from app.scheduler import _get_lang_details, _get_lang_text, safe_send_html
 from app.services.channel_buttons import public_channel_cta_keyboard
 from app.services.channel_render import private_summary, public_summary_from_private
 from app.services.post_refs import PostRef, dumps_refs, loads_refs
+from app.services.video_scripts import send_video_scripts_for_date
 
 
 logger = logging.getLogger(__name__)
@@ -210,6 +211,8 @@ async def publish_date(bot: Bot, target_date: date, clear: bool, send: bool, edi
             )
 
     await save_message_refs(date_key, provider, private_refs_by_index, public_refs_by_index, total_details)
+    sent_video_scripts = await send_video_scripts_for_date(bot, target_date, limit=total_details)
+    logger.info("Video scripts sent date=%s count=%s", date_key, sent_video_scripts)
 
 
 async def main() -> None:

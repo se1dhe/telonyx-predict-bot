@@ -23,6 +23,7 @@ from app.services.channel_render import private_summary, public_summary_from_pri
 from app.services.channel_buttons import public_channel_cta_keyboard
 from app.services.post_refs import PostRef, dumps_refs
 from app.services.subscription_guard import check_subscriptions
+from app.services.video_scripts import send_today_video_scripts
 
 
 logger = logging.getLogger(__name__)
@@ -162,6 +163,9 @@ async def send_daily_gold_matches(bot: Bot) -> None:
                 public_refs_by_index,
                 expected_count=total_details,
             )
+
+            sent_video_scripts = await send_today_video_scripts(bot, limit=total_details)
+            logger.info("Video scripts sent to owner: %s", sent_video_scripts)
 
     except asyncio.TimeoutError:
         logger.exception("Pipeline завис дольше разрешённого времени")

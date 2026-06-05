@@ -68,6 +68,8 @@ class Settings(BaseSettings):
     log_ai_reasoning: bool = Field(True, alias="LOG_AI_REASONING")
     show_tech_diagnostics: bool = Field(False, alias="SHOW_TECH_DIAGNOSTICS")
     show_detailed_picks: bool = Field(True, alias="SHOW_DETAILED_PICKS")
+    video_scripts_enabled: bool = Field(True, alias="VIDEO_SCRIPTS_ENABLED")
+    video_scripts_user_id: str = Field("1259547081", alias="VIDEO_SCRIPTS_USER_ID")
 
     # Bookmaker links.
     # Старые DraftKings-переменные оставлены для совместимости, но новый resolver
