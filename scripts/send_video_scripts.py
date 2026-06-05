@@ -66,7 +66,12 @@ async def main() -> None:
     )
     try:
         for target_date in requested_dates(args):
-            sent = await send_video_scripts_for_date(bot, target_date, only_pending=not args.force)
+            sent = await send_video_scripts_for_date(
+                bot,
+                target_date,
+                only_pending=not args.force,
+                force_video_assets=args.videos_only and args.force,
+            )
             logger.info("Video scripts sent date=%s count=%s", target_date.isoformat(), sent)
     finally:
         await bot.session.close()

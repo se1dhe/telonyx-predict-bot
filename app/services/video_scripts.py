@@ -70,6 +70,7 @@ async def send_video_scripts_for_date(
     target_date: date,
     limit: int | None = None,
     only_pending: bool = True,
+    force_video_assets: bool = False,
 ) -> int:
     settings = get_settings()
     if not settings.video_scripts_enabled:
@@ -88,13 +89,14 @@ async def send_video_scripts_for_date(
         limit=limit,
         only_pending=only_pending,
     )
-    return await send_video_scripts(bot, recipient, predictions)
+    return await send_video_scripts(bot, recipient, predictions, force_video_assets=force_video_assets)
 
 
 async def send_video_scripts(
     bot: Bot,
     recipient_chat_id: str,
     predictions: list[Prediction],
+    force_video_assets: bool = False,
 ) -> int:
     sent = 0
     for index, prediction in enumerate(predictions, start=1):
@@ -113,7 +115,7 @@ async def send_video_scripts(
                 await mark_video_script_sent(prediction.id)
                 text_sent = True
 
-            if settings.video_assets_enabled and prediction.video_asset_sent_at is None:
+            if settings.video_assets_enabled and (force_video_assets or prediction.video_asset_sent_at is None):
                 asset = await generate_video_asset_for_prediction(prediction)
                 if asset:
                     await bot.send_video(
