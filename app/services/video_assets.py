@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import logging
+import math
 import re
 import shlex
 import shutil
@@ -162,12 +163,17 @@ async def render_vertical_video(
     width = max(360, int(settings.video_assets_width or 1080))
     height = max(640, int(settings.video_assets_height or 1920))
     fps = max(12, int(settings.video_assets_fps or 30))
-    duration = max(20, min(60, int(settings.video_assets_duration_seconds or 38)))
+    audio_duration = await asyncio.to_thread(probe_audio_duration, audio_path, ffmpeg_path)
+    duration = max(
+        int(settings.video_assets_duration_seconds or 30),
+        math.ceil(audio_duration + 0.8) if audio_duration else 0,
+    )
+    duration = max(18, min(90, duration))
 
     title = match_title(prediction, pick)
     main_bet = bet_name(pick, "ru") if pick else simple_bet_name(prediction.main_bet_label or prediction.main_bet_code, "ru")
     confidence = str(pick.confidence if pick else prediction.confidence)
-    why = compact_text((pick.why_this_match_is_gold if pick else "") or prediction.rendered_text, 95)
+    why = compact_text((pick.why_this_match_is_gold if pick else "") or prediction.rendered_text, 150)
     time_text = format_start_time(prediction.start_time)
     odds = prediction.bookmaker_odds or (f"{pick.bookmaker_odds:.2f}" if pick and pick.bookmaker_odds else "")
     bookmaker = prediction.bookmaker_name or (pick.bookmaker_name if pick else "") or settings.bookmaker_name
@@ -176,25 +182,32 @@ async def render_vertical_video(
     local_font = "/System/Library/Fonts/Supplemental/Arial Bold.ttf"
     font_file = local_font if Path(local_font).exists() else font
 
+    pad = width // 12
+    title_y = height // 7
+    pick_y = height // 3
     filters = [
         f"color=c=0x08111f:s={width}x{height}:r={fps}:d={duration}",
         "format=yuv420p",
-        f"drawbox=x=0:y=0:w={width}:h={height}:color=0x020712@0.45:t=fill",
-        f"drawbox=x=0:y=0:w={width}:h={max(80, height // 12)}:color=0x123d5a@0.55:t=fill",
-        f"drawbox=x=0:y={height - max(120, height // 10)}:w={width}:h={max(120, height // 10)}:color=0x07351f@0.45:t=fill",
-        f"drawbox=x={width // 12}:y={height // 14}:w={width - width // 6}:h=4:color=0x32d583@0.95:t=fill",
-        draw_text(font_file, "AI MATCH SIGNAL", scale_font(38, width), width // 12, height // 18, "0x32d583"),
-        draw_text(font_file, wrap_text(title.upper(), 20), scale_font(52, width), width // 12, height // 7, "white", line_spacing=16),
-        draw_text(font_file, "MAIN PICK", scale_font(30, width), width // 12, height // 3, "0x8ab4ff"),
-        draw_text(font_file, wrap_text(main_bet.upper(), 20), scale_font(48, width), width // 12, height // 3 + 52, "white", line_spacing=14),
-        draw_text(font_file, f"CONFIDENCE {confidence}/100", scale_font(38, width), width // 12, height // 2, "0x32d583"),
-        draw_text(font_file, wrap_text(f"{bookmaker} {odds}".strip(), 24), scale_font(30, width), width // 12, height // 2 + 66, "0xfed766"),
-        draw_text(font_file, wrap_text(why, 27), scale_font(32, width), width // 12, height // 2 + 160, "white", line_spacing=12),
-        draw_text(font_file, wrap_text(time_text, 26), scale_font(26, width), width // 12, height - 205, "0xb8c4d9"),
-        draw_text(font_file, "FULL BREAKDOWN IN TELEGRAM", scale_font(30, width), width // 12, height - 130, "0x32d583"),
+        f"drawbox=x=0:y=0:w={width}:h={height}:color=0x020712@0.40:t=fill",
+        f"drawbox=x=0:y=0:w={width}:h={height // 4}:color=0x063559@0.32:t=fill",
+        f"drawbox=x=0:y={height - height // 5}:w={width}:h={height // 5}:color=0x063a24@0.30:t=fill",
+        f"drawbox=x='mod(t*85,{width + 180})-180':y={height // 13}:w=180:h=3:color=0x32d583@0.92:t=fill",
+        f"drawbox=x='mod(t*55,{width + 260})-260':y={height - height // 6}:w=260:h=3:color=0x8ab4ff@0.65:t=fill",
+        f"drawbox=x={pad - 16}:y={title_y - 28}:w={width - 2 * pad + 32}:h={height // 4}:color=black@0.25:t=fill:enable='between(t,0.2,{duration})'",
+        f"drawbox=x={pad - 16}:y={pick_y - 30}:w={width - 2 * pad + 32}:h={height // 4}:color=black@0.22:t=fill:enable='between(t,2.6,{duration})'",
+        f"drawbox=x={pad}:y={height // 15}:w={width - 2 * pad}:h=4:color=0x32d583@0.95:t=fill",
+        draw_text(font_file, "TELONYX AI SIGNAL", scale_font(30, width), pad, height // 23, "0x32d583", alpha="if(lt(t,0.4),t/0.4,1)"),
         "fade=t=in:st=0:d=0.45",
-        f"fade=t=out:st={duration - 0.7}:d=0.7",
     ]
+    filters.extend(draw_text_block(font_file, title.upper(), scale_font(50, width), pad, title_y, "white", 18, 3, line_gap=12, start=0.35))
+    filters.extend(draw_text_block(font_file, "MAIN PICK", scale_font(25, width), pad, pick_y, "0x8ab4ff", 28, 1, start=2.5))
+    filters.extend(draw_text_block(font_file, main_bet.upper(), scale_font(43, width), pad, pick_y + scale_font(46, width), "white", 20, 2, line_gap=10, start=2.9))
+    filters.extend(draw_text_block(font_file, f"CONFIDENCE {confidence}/100", scale_font(36, width), pad, height // 2 + 20, "0x32d583", 26, 1, start=5.2))
+    filters.extend(draw_text_block(font_file, f"{bookmaker} {odds}".strip(), scale_font(28, width), pad, height // 2 + 82, "0xfed766", 26, 1, start=5.6))
+    filters.extend(draw_text_block(font_file, why, scale_font(29, width), pad, height // 2 + 175, "white", 29, 4, line_gap=9, start=7.0))
+    filters.extend(draw_text_block(font_file, time_text, scale_font(24, width), pad, height - 205, "0xb8c4d9", 28, 1, start=10.0))
+    filters.extend(draw_text_block(font_file, "FULL BREAKDOWN IN TELEGRAM", scale_font(28, width), pad, height - 132, "0x32d583", 29, 1, start=11.0))
+    filters.append(f"fade=t=out:st={duration - 0.7}:d=0.7")
 
     cmd = [
         ffmpeg_path,
@@ -217,7 +230,6 @@ async def render_vertical_video(
         "aac",
         "-b:a",
         "160k",
-        "-shortest",
         "-movflags",
         "+faststart",
         str(output_path),
@@ -232,6 +244,32 @@ def run_ffmpeg(cmd: list[str], timeout: int) -> None:
     if result.returncode != 0:
         safe_cmd = " ".join(shlex.quote(part) for part in cmd[:8]) + " ..."
         raise RuntimeError(f"ffmpeg failed code={result.returncode} cmd={safe_cmd} stderr={result.stderr[-1200:]}")
+
+
+def probe_audio_duration(audio_path: Path, ffmpeg_path: str) -> float:
+    ffprobe = str(Path(ffmpeg_path).with_name("ffprobe")) if "/" in ffmpeg_path else "ffprobe"
+    try:
+        result = subprocess.run(
+            [
+                ffprobe,
+                "-v",
+                "error",
+                "-show_entries",
+                "format=duration",
+                "-of",
+                "default=noprint_wrappers=1:nokey=1",
+                str(audio_path),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=15,
+            check=False,
+        )
+        if result.returncode == 0:
+            return float((result.stdout or "0").strip() or 0)
+    except Exception:
+        logger.warning("Failed to probe audio duration: %s", audio_path)
+    return 0.0
 
 
 def build_voiceover_text(prediction: Prediction, pick: AiPick | None) -> str:
@@ -305,13 +343,15 @@ def draw_text(
     font_file: str,
     text: str,
     size: int,
-    x: int,
-    y: int,
+    x: int | str,
+    y: int | str,
     color: str,
     line_spacing: int = 10,
+    alpha: str | None = None,
+    enable: str | None = None,
 ) -> str:
     escaped = escape_drawtext(text)
-    return (
+    value = (
         "drawtext="
         f"fontfile='{escape_drawtext(font_file)}':"
         f"text='{escaped}':"
@@ -321,6 +361,44 @@ def draw_text(
         f"line_spacing={line_spacing}:"
         "shadowcolor=black@0.55:shadowx=3:shadowy=3"
     )
+    if alpha:
+        value += f":alpha='{alpha}'"
+    if enable:
+        value += f":enable='{enable}'"
+    return value
+
+
+def draw_text_block(
+    font_file: str,
+    text: str,
+    size: int,
+    x: int,
+    y: int,
+    color: str,
+    max_chars: int,
+    max_lines: int,
+    line_gap: int = 8,
+    start: float = 0.0,
+) -> list[str]:
+    lines = wrap_lines(text, max_chars)[:max_lines]
+    line_height = int(size * 1.16) + line_gap
+    result: list[str] = []
+    for index, line in enumerate(lines):
+        line_start = start + index * 0.08
+        alpha = f"if(lt(t,{line_start}),0,if(lt(t,{line_start + 0.35}),(t-{line_start})/0.35,1))"
+        result.append(
+            draw_text(
+                font_file,
+                line,
+                size,
+                x,
+                y + index * line_height,
+                color,
+                alpha=alpha,
+                enable=f"gte(t,{line_start})",
+            )
+        )
+    return result
 
 
 def scale_font(size: int, width: int) -> int:
@@ -334,14 +412,14 @@ def escape_drawtext(value: str) -> str:
         .replace(":", "\\:")
         .replace("'", "\\'")
         .replace("%", "\\%")
-        .replace("\n", "\\n")
+        .replace("\n", " ")
     )
 
 
-def wrap_text(value: str, width: int) -> str:
+def wrap_lines(value: str, width: int) -> list[str]:
     words = str(value or "").split()
     if not words:
-        return ""
+        return []
 
     lines: list[str] = []
     current = ""
@@ -354,4 +432,4 @@ def wrap_text(value: str, width: int) -> str:
             current = word
     if current:
         lines.append(current)
-    return "\n".join(lines[:5])
+    return lines

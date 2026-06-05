@@ -25,6 +25,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--today", action="store_true", help="Use today's date in configured timezone")
     parser.add_argument("--tomorrow", action="store_true", help="Use tomorrow's date in configured timezone")
     parser.add_argument("--force", action="store_true", help="Send again even if scripts were already marked as sent")
+    parser.add_argument("--videos-only", action="store_true", help="Regenerate and send videos without resending text scripts")
     return parser.parse_args()
 
 
@@ -55,6 +56,10 @@ async def main() -> None:
     settings = get_settings()
 
     await init_db()
+    if args.videos_only:
+        settings.video_assets_enabled = True
+        settings.video_assets_send_text_script = False
+
     bot = Bot(
         token=settings.telegram_bot_token,
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),
