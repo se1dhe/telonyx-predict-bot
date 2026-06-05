@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import logging
 import re
 import shlex
@@ -10,7 +11,7 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
-from openai import AsyncOpenAI
+import aiohttp
 
 from app.config import Settings, get_settings
 from app.models import Prediction
@@ -33,8 +34,8 @@ async def generate_video_asset_for_prediction(prediction: Prediction) -> VideoAs
     if not settings.video_assets_enabled:
         return None
 
-    if not settings.openai_api_key:
-        logger.warning("Video asset skipped: OPENAI_API_KEY is empty")
+    if not settings.gemini_api_key:
+        logger.warning("Video asset skipped: GEMINI_API_KEY is empty")
         return None
 
     ffmpeg_path = shutil.which(settings.video_assets_ffmpeg_path) or settings.video_assets_ffmpeg_path
@@ -61,17 +62,93 @@ async def generate_video_asset_for_prediction(prediction: Prediction) -> VideoAs
 
 
 async def create_voiceover_audio(text: str, output_path: Path, settings: Settings) -> None:
-    client = AsyncOpenAI(api_key=settings.openai_api_key)
-    response = await client.audio.speech.create(
-        model=settings.video_assets_tts_model,
-        voice=settings.video_assets_tts_voice,
-        input=text,
-        instructions=settings.video_assets_tts_instructions,
-        response_format="mp3",
-        speed=settings.video_assets_tts_speed,
-        timeout=max(30, int(settings.ai_timeout_seconds or 90)),
+    """Create WAV voiceover using Gemini speech generation."""
+    endpoint = (
+        "https://generativelanguage.googleapis.com/v1beta/models/"
+        f"{settings.video_assets_tts_model}:generateContent"
     )
-    await asyncio.to_thread(response.write_to_file, output_path)
+    payload = {
+        "contents": [
+            {
+                "parts": [
+                    {
+                        "text": (
+                            f"{settings.video_assets_tts_instructions}\n\n"
+                            f"Текст озвучки:\n{text}"
+                        )
+                    }
+                ]
+            }
+        ],
+        "generationConfig": {
+            "responseModalities": ["AUDIO"],
+            "speechConfig": {
+                "voiceConfig": {
+                    "prebuiltVoiceConfig": {
+                        "voiceName": settings.video_assets_tts_voice,
+                    }
+                }
+            },
+        },
+    }
+    timeout = aiohttp.ClientTimeout(total=max(30, int(settings.ai_timeout_seconds or 90)))
+    async with aiohttp.ClientSession(timeout=timeout) as session:
+        async with session.post(
+            endpoint,
+            params={"key": settings.gemini_api_key},
+            json=payload,
+        ) as response:
+            raw = await response.text()
+            if response.status >= 400:
+                raise RuntimeError(f"Gemini TTS failed status={response.status} body={raw[:1200]}")
+
+    audio_bytes, mime_type = extract_gemini_audio(raw)
+    if not audio_bytes:
+        raise RuntimeError(f"Gemini TTS returned no audio data: {raw[:1200]}")
+
+    if "wav" in mime_type.lower() or audio_bytes.startswith(b"RIFF"):
+        output_path.write_bytes(audio_bytes)
+        return
+
+    # Gemini can return raw PCM on some models. ffmpeg accepts WAV more reliably,
+    # so wrap 24 kHz 16-bit mono PCM when no container is present.
+    output_path.write_bytes(wav_wrap_pcm(audio_bytes, sample_rate=24000, channels=1, bits_per_sample=16))
+
+
+def extract_gemini_audio(raw_response: str) -> tuple[bytes, str]:
+    import json
+
+    data = json.loads(raw_response)
+    candidates = data.get("candidates") or []
+    for candidate in candidates:
+        parts = candidate.get("content", {}).get("parts") or []
+        for part in parts:
+            inline_data = part.get("inlineData") or part.get("inline_data") or {}
+            encoded = inline_data.get("data")
+            if encoded:
+                return base64.b64decode(encoded), str(inline_data.get("mimeType") or inline_data.get("mime_type") or "")
+    return b"", ""
+
+
+def wav_wrap_pcm(pcm: bytes, sample_rate: int, channels: int, bits_per_sample: int) -> bytes:
+    byte_rate = sample_rate * channels * bits_per_sample // 8
+    block_align = channels * bits_per_sample // 8
+    data_size = len(pcm)
+    header = (
+        b"RIFF"
+        + (36 + data_size).to_bytes(4, "little")
+        + b"WAVEfmt "
+        + (16).to_bytes(4, "little")
+        + (1).to_bytes(2, "little")
+        + channels.to_bytes(2, "little")
+        + sample_rate.to_bytes(4, "little")
+        + byte_rate.to_bytes(4, "little")
+        + block_align.to_bytes(2, "little")
+        + bits_per_sample.to_bytes(2, "little")
+        + b"data"
+        + data_size.to_bytes(4, "little")
+    )
+    return header + pcm
 
 
 async def render_vertical_video(

@@ -79,9 +79,8 @@ class Settings(BaseSettings):
     video_assets_width: int = Field(1080, alias="VIDEO_ASSETS_WIDTH")
     video_assets_height: int = Field(1920, alias="VIDEO_ASSETS_HEIGHT")
     video_assets_fps: int = Field(30, alias="VIDEO_ASSETS_FPS")
-    video_assets_tts_model: str = Field("gpt-4o-mini-tts", alias="VIDEO_ASSETS_TTS_MODEL")
-    video_assets_tts_voice: str = Field("onyx", alias="VIDEO_ASSETS_TTS_VOICE")
-    video_assets_tts_speed: float = Field(1.04, alias="VIDEO_ASSETS_TTS_SPEED")
+    video_assets_tts_model: str = Field("gemini-2.5-flash-preview-tts", alias="VIDEO_ASSETS_TTS_MODEL")
+    video_assets_tts_voice: str = Field("Kore", alias="VIDEO_ASSETS_TTS_VOICE")
     video_assets_tts_instructions: str = Field(
         "Говори по-русски энергично, уверенно и короткими фразами, как спортивный аналитик для Shorts.",
         alias="VIDEO_ASSETS_TTS_INSTRUCTIONS",
