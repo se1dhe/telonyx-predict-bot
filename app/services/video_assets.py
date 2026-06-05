@@ -179,18 +179,19 @@ async def render_vertical_video(
     filters = [
         f"color=c=0x08111f:s={width}x{height}:r={fps}:d={duration}",
         "format=yuv420p",
-        "geq=r='16+18*sin((X+T*120)/170)+10*sin((Y+T*80)/210)':g='24+20*sin((X+Y+T*160)/250)':b='42+36*sin((X-T*120)/190)'",
-        f"drawbox=x=0:y=0:w={width}:h={height}:color=black@0.18:t=fill",
-        f"drawbox=x=70:y=120:w={width - 140}:h=4:color=0x32d583@0.95:t=fill",
-        draw_text(font_file, "AI MATCH SIGNAL", 56, 78, 92, "0x32d583"),
-        draw_text(font_file, wrap_text(title.upper(), 22), 78, 72, 240, "white", line_spacing=22),
-        draw_text(font_file, "MAIN PICK", 42, 72, 580, "0x8ab4ff"),
-        draw_text(font_file, wrap_text(main_bet.upper(), 22), 76, 72, 650, "white", line_spacing=18),
-        draw_text(font_file, f"CONFIDENCE {confidence}/100", 56, 72, 870, "0x32d583"),
-        draw_text(font_file, wrap_text(f"{bookmaker} {odds}".strip(), 26), 44, 72, 980, "0xfed766"),
-        draw_text(font_file, wrap_text(why, 30), 48, 72, 1120, "white", line_spacing=16),
-        draw_text(font_file, wrap_text(time_text, 28), 38, 72, 1460, "0xb8c4d9"),
-        draw_text(font_file, "FULL BREAKDOWN IN TELEGRAM", 46, 72, 1650, "0x32d583"),
+        f"drawbox=x=0:y=0:w={width}:h={height}:color=0x020712@0.45:t=fill",
+        f"drawbox=x=0:y=0:w={width}:h={max(80, height // 12)}:color=0x123d5a@0.55:t=fill",
+        f"drawbox=x=0:y={height - max(120, height // 10)}:w={width}:h={max(120, height // 10)}:color=0x07351f@0.45:t=fill",
+        f"drawbox=x={width // 12}:y={height // 14}:w={width - width // 6}:h=4:color=0x32d583@0.95:t=fill",
+        draw_text(font_file, "AI MATCH SIGNAL", scale_font(38, width), width // 12, height // 18, "0x32d583"),
+        draw_text(font_file, wrap_text(title.upper(), 20), scale_font(52, width), width // 12, height // 7, "white", line_spacing=16),
+        draw_text(font_file, "MAIN PICK", scale_font(30, width), width // 12, height // 3, "0x8ab4ff"),
+        draw_text(font_file, wrap_text(main_bet.upper(), 20), scale_font(48, width), width // 12, height // 3 + 52, "white", line_spacing=14),
+        draw_text(font_file, f"CONFIDENCE {confidence}/100", scale_font(38, width), width // 12, height // 2, "0x32d583"),
+        draw_text(font_file, wrap_text(f"{bookmaker} {odds}".strip(), 24), scale_font(30, width), width // 12, height // 2 + 66, "0xfed766"),
+        draw_text(font_file, wrap_text(why, 27), scale_font(32, width), width // 12, height // 2 + 160, "white", line_spacing=12),
+        draw_text(font_file, wrap_text(time_text, 26), scale_font(26, width), width // 12, height - 205, "0xb8c4d9"),
+        draw_text(font_file, "FULL BREAKDOWN IN TELEGRAM", scale_font(30, width), width // 12, height - 130, "0x32d583"),
         "fade=t=in:st=0:d=0.45",
         f"fade=t=out:st={duration - 0.7}:d=0.7",
     ]
@@ -223,11 +224,11 @@ async def render_vertical_video(
     ]
 
     logger.info("Rendering video asset for prediction=%s", prediction.id)
-    await asyncio.to_thread(run_ffmpeg, cmd)
+    await asyncio.to_thread(run_ffmpeg, cmd, int(settings.video_assets_render_timeout_seconds or 120))
 
 
-def run_ffmpeg(cmd: list[str]) -> None:
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=90, check=False)
+def run_ffmpeg(cmd: list[str], timeout: int) -> None:
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, check=False)
     if result.returncode != 0:
         safe_cmd = " ".join(shlex.quote(part) for part in cmd[:8]) + " ..."
         raise RuntimeError(f"ffmpeg failed code={result.returncode} cmd={safe_cmd} stderr={result.stderr[-1200:]}")
@@ -320,6 +321,10 @@ def draw_text(
         f"line_spacing={line_spacing}:"
         "shadowcolor=black@0.55:shadowx=3:shadowy=3"
     )
+
+
+def scale_font(size: int, width: int) -> int:
+    return max(18, int(size * width / 720))
 
 
 def escape_drawtext(value: str) -> str:
