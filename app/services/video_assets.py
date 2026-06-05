@@ -403,7 +403,7 @@ def build_voiceover_text(prediction: Prediction, pick: AiPick | None) -> str:
     main_bet = bet_name(pick, "ru") if pick else simple_bet_name(prediction.main_bet_label or prediction.main_bet_code, "ru")
     confidence = pick.confidence if pick else prediction.confidence
     bookmaker = prediction.bookmaker_name or (pick.bookmaker_name if pick else "") or get_settings().bookmaker_name
-    reasoning = compact_text(russian_video_text((pick.reasoning if pick else "") or prediction.rendered_text), 360)
+    reasoning = compact_text(clean_voiceover_sentence(russian_video_text((pick.reasoning if pick else "") or prediction.rendered_text)), 360)
 
     return (
         f"Нейросеть разобрала матч {title}. "
@@ -414,6 +414,11 @@ def build_voiceover_text(prediction: Prediction, pick: AiPick | None) -> str:
         "Это не гарантия, а статистический фильтр. "
         "Полный разбор, рискованный вариант и ссылка на линию уже в Телеграме."
     )
+
+
+def clean_voiceover_sentence(value: str) -> str:
+    text = re.sub(r"\s+", " ", str(value or "")).strip()
+    return text.rstrip(".!?…")
 
 
 def build_video_caption(prediction: Prediction, pick: AiPick | None) -> str:
