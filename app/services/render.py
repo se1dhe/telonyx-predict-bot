@@ -273,6 +273,9 @@ def format_match_time(ctx: CandidateContext | None, lang: str = "uk") -> str:
 
 def bet_name(p: AiPick, lang: str) -> str:
     lang = normalize_lang(lang)
+    localized = p.text_for("main_bet_label", lang)
+    if localized:
+        return simple_bet_name(localized, lang)
     if p.main_bet_code in BET_NAMES:
         return BET_NAMES[p.main_bet_code][lang]
     return simple_bet_name(str(p.main_bet_label or p.main_bet_code), lang)
@@ -449,8 +452,9 @@ def parse_match_datetime(value: str) -> datetime | None:
 
 
 def generated_why(p: AiPick, ctx: CandidateContext | None, lang: str) -> str:
-    if p.why_this_match_is_gold:
-        return compact_reason(localize_free_text(p.why_this_match_is_gold, lang), 520)
+    value = p.text_for("why_this_match_is_gold", normalize_lang(lang))
+    if value:
+        return compact_reason(localize_free_text(value, lang), 520)
 
     lang = normalize_lang(lang)
     return {
@@ -461,8 +465,9 @@ def generated_why(p: AiPick, ctx: CandidateContext | None, lang: str) -> str:
 
 
 def generated_analysis(p: AiPick, ctx: CandidateContext | None, lang: str) -> str:
-    if p.reasoning:
-        return compact_reason(localize_free_text(p.reasoning, lang), 900)
+    value = p.text_for("reasoning", normalize_lang(lang))
+    if value:
+        return compact_reason(localize_free_text(value, lang), 900)
 
     lang = normalize_lang(lang)
     return {
@@ -496,7 +501,7 @@ def render_daily_summary(
 
     for idx, p in enumerate(picks, start=1):
         lines.extend([
-            f"{idx}. <b>{html_escape(localize_free_text(p.match_title, lang))}</b>",
+            f"{idx}. <b>{html_escape(localize_free_text(p.text_for('match_title', lang), lang))}</b>",
             f"{L(lang, 'bet')} {html_escape(bet_name(p, lang))}",
             f"{L(lang, 'confidence')} {p.confidence}/100 ({confidence_text(p.confidence, lang)})",
             f"{risk_emoji(p.risk_level)} {L(lang, 'risk')} {RISK[lang][risk_key(p.risk_level)]}",
@@ -545,7 +550,7 @@ def render_pick_detail(p: AiPick, ctx: CandidateContext | None = None, lang: str
         )
 
     lines = [
-        f"⚽️ <b>{html_escape(localize_free_text(p.match_title, lang))}</b>",
+        f"⚽️ <b>{html_escape(localize_free_text(p.text_for('match_title', lang), lang))}</b>",
         f"{L(lang, 'date_time')} {html_escape(match_time)}",
         f"{L(lang, 'league')} {html_escape(league)}",
         "",
@@ -555,11 +560,11 @@ def render_pick_detail(p: AiPick, ctx: CandidateContext | None = None, lang: str
         f"{L(lang, 'confidence')} {p.confidence}/100 ({confidence_text(p.confidence, lang)})",
         f"{risk_emoji(p.risk_level)} {L(lang, 'risk')} {RISK[lang][risk_key(p.risk_level)]}",
         "",
-        f"{L(lang, 'safe')} {html_escape(simple_bet_name(p.safe_bet_label, lang))}",
-        f"{L(lang, 'risky')} {html_escape(simple_bet_name(p.risky_bet_label, lang))}",
+        f"{L(lang, 'safe')} {html_escape(simple_bet_name(p.text_for('safe_bet_label', lang), lang))}",
+        f"{L(lang, 'risky')} {html_escape(simple_bet_name(p.text_for('risky_bet_label', lang), lang))}",
         "",
-        f"{L(lang, 'winner')} {html_escape(localize_free_text(p.predicted_winner, lang))}",
-        f"{L(lang, 'score_team')} {html_escape(localize_free_text(p.who_should_score, lang))}",
+        f"{L(lang, 'winner')} {html_escape(localize_free_text(p.text_for('predicted_winner', lang), lang))}",
+        f"{L(lang, 'score_team')} {html_escape(localize_free_text(p.text_for('who_should_score', lang), lang))}",
         "",
         f"{L(lang, 'why')}\n{html_escape(generated_why(p, ctx, lang))}",
         "",

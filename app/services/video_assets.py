@@ -273,11 +273,12 @@ async def render_vertical_video(
     )
     duration = max(18, min(90, duration))
 
-    title = match_title(prediction, pick)
+    title = (pick.text_for("match_title", "ru") if pick else "") or match_title(prediction, pick)
     title_ru = russian_video_text(title)
     main_bet = bet_name(pick, "ru") if pick else simple_bet_name(prediction.main_bet_label or prediction.main_bet_code, "ru")
     confidence = str(pick.confidence if pick else prediction.confidence)
-    why = compact_text(russian_video_text((pick.why_this_match_is_gold if pick else "") or prediction.rendered_text), 105)
+    raw_why = (pick.text_for("why_this_match_is_gold", "ru") if pick else "") or prediction.rendered_text
+    why = compact_text(russian_video_text(raw_why), 105)
     time_text = format_start_time(prediction.start_time)
     odds = prediction.bookmaker_odds or (f"{pick.bookmaker_odds:.2f}" if pick and pick.bookmaker_odds else "")
     bookmaker = prediction.bookmaker_name or (pick.bookmaker_name if pick else "") or settings.bookmaker_name
@@ -399,11 +400,12 @@ def probe_audio_duration(audio_path: Path, ffmpeg_path: str) -> float:
 
 
 def build_voiceover_text(prediction: Prediction, pick: AiPick | None) -> str:
-    title = russian_video_text(match_title(prediction, pick))
+    title = russian_video_text((pick.text_for("match_title", "ru") if pick else "") or match_title(prediction, pick))
     main_bet = bet_name(pick, "ru") if pick else simple_bet_name(prediction.main_bet_label or prediction.main_bet_code, "ru")
     confidence = pick.confidence if pick else prediction.confidence
     bookmaker = prediction.bookmaker_name or (pick.bookmaker_name if pick else "") or get_settings().bookmaker_name
-    reasoning = compact_text(clean_voiceover_sentence(russian_video_text((pick.reasoning if pick else "") or prediction.rendered_text)), 360)
+    raw_reasoning = (pick.text_for("reasoning", "ru") if pick else "") or prediction.rendered_text
+    reasoning = compact_text(clean_voiceover_sentence(russian_video_text(raw_reasoning)), 360)
 
     return (
         f"Нейросеть разобрала матч {title}. "
@@ -422,7 +424,7 @@ def clean_voiceover_sentence(value: str) -> str:
 
 
 def build_video_caption(prediction: Prediction, pick: AiPick | None) -> str:
-    title = russian_video_text(match_title(prediction, pick))
+    title = russian_video_text((pick.text_for("match_title", "ru") if pick else "") or match_title(prediction, pick))
     main_bet = bet_name(pick, "ru") if pick else simple_bet_name(prediction.main_bet_label or prediction.main_bet_code, "ru")
     confidence = pick.confidence if pick else prediction.confidence
     bookmaker = prediction.bookmaker_name or (pick.bookmaker_name if pick else "") or get_settings().bookmaker_name

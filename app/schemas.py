@@ -130,6 +130,11 @@ class AiPick(BaseModel):
     bookmaker_url: str = ""
     bookmaker_name: str = ""
     bookmaker_odds: float | None = None
+    localized: dict[str, dict[str, str]] = Field(default_factory=dict)
+
+    def text_for(self, field: str, lang: str) -> str:
+        localized = self.localized.get(lang) or {}
+        return localized.get(field) or getattr(self, field, "")
 
 
 class AiSelectionResponse(BaseModel):
