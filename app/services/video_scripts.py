@@ -29,28 +29,36 @@ async def load_predictions_for_video_scripts(
     date_key: str,
     provider: str,
     limit: int | None = None,
+    only_pending: bool = True,
 ) -> list[Prediction]:
     async with SessionLocal() as session:
-        rows = (
-            await session.execute(
-                select(Prediction)
-                .where(Prediction.date_key == date_key)
-                .where(Prediction.provider == provider)
-                .where(Prediction.rendered_text != "")
-                .order_by(Prediction.start_time.asc(), Prediction.ai_rank_score.desc())
-            )
-        ).scalars().all()
+        stmt = (
+            select(Prediction)
+            .where(Prediction.date_key == date_key)
+            .where(Prediction.provider == provider)
+            .where(Prediction.rendered_text != "")
+            .order_by(Prediction.start_time.asc(), Prediction.ai_rank_score.desc())
+        )
+        if only_pending:
+            stmt = stmt.where(Prediction.video_script_sent_at.is_(None))
+
+        rows = (await session.execute(stmt)).scalars().all()
 
     return rows[:limit] if limit is not None else rows
 
 
-async def send_today_video_scripts(bot: Bot, limit: int | None = None) -> int:
+async def send_today_video_scripts(bot: Bot, limit: int | None = None, only_pending: bool = True) -> int:
     settings = get_settings()
     date_key = datetime.now(ZoneInfo(settings.tz)).date().isoformat()
-    return await send_video_scripts_for_date(bot, date.fromisoformat(date_key), limit=limit)
+    return await send_video_scripts_for_date(bot, date.fromisoformat(date_key), limit=limit, only_pending=only_pending)
 
 
-async def send_video_scripts_for_date(bot: Bot, target_date: date, limit: int | None = None) -> int:
+async def send_video_scripts_for_date(
+    bot: Bot,
+    target_date: date,
+    limit: int | None = None,
+    only_pending: bool = True,
+) -> int:
     settings = get_settings()
     if not settings.video_scripts_enabled:
         logger.info("Video script notifications are disabled")
@@ -62,7 +70,12 @@ async def send_video_scripts_for_date(bot: Bot, target_date: date, limit: int | 
         return 0
 
     provider = provider_name_for_settings()
-    predictions = await load_predictions_for_video_scripts(target_date.isoformat(), provider, limit=limit)
+    predictions = await load_predictions_for_video_scripts(
+        target_date.isoformat(),
+        provider,
+        limit=limit,
+        only_pending=only_pending,
+    )
     return await send_video_scripts(bot, recipient, predictions)
 
 
@@ -81,10 +94,19 @@ async def send_video_scripts(
                 parse_mode=ParseMode.HTML,
                 disable_web_page_preview=True,
             )
+            await mark_video_script_sent(prediction.id)
             sent += 1
         except Exception as exc:
             logger.exception("Failed to send video script prediction=%s to user=%s: %s", prediction.id, recipient_chat_id, exc)
     return sent
+
+
+async def mark_video_script_sent(prediction_id: int) -> None:
+    async with SessionLocal() as session:
+        prediction = await session.get(Prediction, prediction_id)
+        if prediction:
+            prediction.video_script_sent_at = datetime.utcnow()
+            await session.commit()
 
 
 def render_video_script_message(prediction: Prediction, index: int = 1, total: int = 1) -> str:

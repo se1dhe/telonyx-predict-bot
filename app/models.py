@@ -45,6 +45,7 @@ class Prediction(Base):
     bookmaker_resolved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     private_message_refs: Mapped[str] = mapped_column(Text, default="")
     public_message_refs: Mapped[str] = mapped_column(Text, default="")
+    video_script_sent_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     is_finished: Mapped[bool] = mapped_column(Boolean, default=False)
     is_success: Mapped[bool | None] = mapped_column(Boolean, nullable=True)

@@ -160,6 +160,7 @@ async def ensure_runtime_columns(conn) -> None:
         "bookmaker_resolved_at": "DATETIME",
         "private_message_refs": "TEXT",
         "public_message_refs": "TEXT",
+        "video_script_sent_at": "DATETIME",
     }
 
     for name, sqlite_type in bot_user_columns.items():

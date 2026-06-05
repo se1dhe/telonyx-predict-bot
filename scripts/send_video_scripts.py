@@ -24,6 +24,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("dates", nargs="*", help="ISO dates, for example 2026-06-05")
     parser.add_argument("--today", action="store_true", help="Use today's date in configured timezone")
     parser.add_argument("--tomorrow", action="store_true", help="Use tomorrow's date in configured timezone")
+    parser.add_argument("--force", action="store_true", help="Send again even if scripts were already marked as sent")
     return parser.parse_args()
 
 
@@ -60,7 +61,7 @@ async def main() -> None:
     )
     try:
         for target_date in requested_dates(args):
-            sent = await send_video_scripts_for_date(bot, target_date)
+            sent = await send_video_scripts_for_date(bot, target_date, only_pending=not args.force)
             logger.info("Video scripts sent date=%s count=%s", target_date.isoformat(), sent)
     finally:
         await bot.session.close()

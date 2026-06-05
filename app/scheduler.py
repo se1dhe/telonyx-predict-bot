@@ -98,6 +98,8 @@ async def send_daily_gold_matches(bot: Bot) -> None:
         async with pipeline_lock:
             if await already_published_today():
                 logger.info("Daily predictions already published today; startup/retry launch skipped")
+                sent_video_scripts = await send_today_video_scripts(bot)
+                logger.info("Pending video scripts sent to owner after already-published check: %s", sent_video_scripts)
                 return
 
             logger.info("Запускаю ежедневный сбор прогнозов")
