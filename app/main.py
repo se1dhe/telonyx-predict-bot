@@ -13,7 +13,17 @@ from app.config import get_settings
 from app.db import init_db
 from app.runtime_lock import wait_for_runtime_lock
 from app.scheduler import send_daily_gold_matches, setup_scheduler
+from app.services.video_scripts import send_today_video_scripts
 from app.web import start_web_server
+
+
+async def send_pending_video_scripts_on_start(bot: Bot) -> None:
+    """Дослать сценарии для уже опубликованных сегодня прогнозов."""
+    try:
+        sent = await send_today_video_scripts(bot)
+        logging.info("Pending video scripts sent on startup: %s", sent)
+    except Exception:
+        logging.exception("Failed to send pending video scripts on startup")
 
 
 async def main() -> None:
@@ -37,6 +47,7 @@ async def main() -> None:
 
     try:
         setup_scheduler(bot)
+        asyncio.create_task(send_pending_video_scripts_on_start(bot))
 
         if settings.run_on_start:
             # Важно: не await.
