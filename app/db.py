@@ -161,6 +161,7 @@ async def ensure_runtime_columns(conn) -> None:
         "private_message_refs": "TEXT",
         "public_message_refs": "TEXT",
         "video_script_sent_at": "DATETIME",
+        "video_asset_sent_at": "DATETIME",
     }
 
     for name, sqlite_type in bot_user_columns.items():

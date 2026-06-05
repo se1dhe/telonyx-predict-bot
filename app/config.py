@@ -70,6 +70,22 @@ class Settings(BaseSettings):
     show_detailed_picks: bool = Field(True, alias="SHOW_DETAILED_PICKS")
     video_scripts_enabled: bool = Field(True, alias="VIDEO_SCRIPTS_ENABLED")
     video_scripts_user_id: str = Field("1259547081", alias="VIDEO_SCRIPTS_USER_ID")
+    video_assets_enabled: bool = Field(False, alias="VIDEO_ASSETS_ENABLED")
+    video_assets_send_text_script: bool = Field(True, alias="VIDEO_ASSETS_SEND_TEXT_SCRIPT")
+    video_assets_dir: str = Field("./data/video_assets", alias="VIDEO_ASSETS_DIR")
+    video_assets_keep_files: bool = Field(False, alias="VIDEO_ASSETS_KEEP_FILES")
+    video_assets_ffmpeg_path: str = Field("ffmpeg", alias="VIDEO_ASSETS_FFMPEG_PATH")
+    video_assets_duration_seconds: int = Field(38, alias="VIDEO_ASSETS_DURATION_SECONDS")
+    video_assets_width: int = Field(1080, alias="VIDEO_ASSETS_WIDTH")
+    video_assets_height: int = Field(1920, alias="VIDEO_ASSETS_HEIGHT")
+    video_assets_fps: int = Field(30, alias="VIDEO_ASSETS_FPS")
+    video_assets_tts_model: str = Field("gpt-4o-mini-tts", alias="VIDEO_ASSETS_TTS_MODEL")
+    video_assets_tts_voice: str = Field("onyx", alias="VIDEO_ASSETS_TTS_VOICE")
+    video_assets_tts_speed: float = Field(1.04, alias="VIDEO_ASSETS_TTS_SPEED")
+    video_assets_tts_instructions: str = Field(
+        "Говори по-русски энергично, уверенно и короткими фразами, как спортивный аналитик для Shorts.",
+        alias="VIDEO_ASSETS_TTS_INSTRUCTIONS",
+    )
 
     # Bookmaker links.
     # Старые DraftKings-переменные оставлены для совместимости, но новый resolver

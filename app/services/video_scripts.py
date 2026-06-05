@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import logging
 from datetime import date, datetime
+from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from aiogram import Bot
+from aiogram import Bot, FSInputFile
 from aiogram.enums import ParseMode
 from sqlalchemy import select
 
@@ -13,6 +14,7 @@ from app.db import SessionLocal
 from app.models import Prediction
 from app.schemas import AiPick
 from app.services.render import bet_name, html_escape, simple_bet_name
+from app.services.video_assets import generate_video_asset_for_prediction
 
 
 logger = logging.getLogger(__name__)
@@ -31,6 +33,7 @@ async def load_predictions_for_video_scripts(
     limit: int | None = None,
     only_pending: bool = True,
 ) -> list[Prediction]:
+    settings = get_settings()
     async with SessionLocal() as session:
         stmt = (
             select(Prediction)
@@ -40,7 +43,15 @@ async def load_predictions_for_video_scripts(
             .order_by(Prediction.start_time.asc(), Prediction.ai_rank_score.desc())
         )
         if only_pending:
-            stmt = stmt.where(Prediction.video_script_sent_at.is_(None))
+            if settings.video_assets_enabled and not settings.video_assets_send_text_script:
+                stmt = stmt.where(Prediction.video_asset_sent_at.is_(None))
+            elif settings.video_assets_enabled:
+                stmt = stmt.where(
+                    Prediction.video_script_sent_at.is_(None)
+                    | Prediction.video_asset_sent_at.is_(None)
+                )
+            else:
+                stmt = stmt.where(Prediction.video_script_sent_at.is_(None))
 
         rows = (await session.execute(stmt)).scalars().all()
 
@@ -86,16 +97,37 @@ async def send_video_scripts(
 ) -> int:
     sent = 0
     for index, prediction in enumerate(predictions, start=1):
+        text_sent = False
+        asset_sent = False
         text = render_video_script_message(prediction, index=index, total=len(predictions))
         try:
-            await bot.send_message(
-                chat_id=recipient_chat_id,
-                text=text[:4000],
-                parse_mode=ParseMode.HTML,
-                disable_web_page_preview=True,
-            )
-            await mark_video_script_sent(prediction.id)
-            sent += 1
+            settings = get_settings()
+            if settings.video_assets_send_text_script and prediction.video_script_sent_at is None:
+                await bot.send_message(
+                    chat_id=recipient_chat_id,
+                    text=text[:4000],
+                    parse_mode=ParseMode.HTML,
+                    disable_web_page_preview=True,
+                )
+                await mark_video_script_sent(prediction.id)
+                text_sent = True
+
+            if settings.video_assets_enabled and prediction.video_asset_sent_at is None:
+                asset = await generate_video_asset_for_prediction(prediction)
+                if asset:
+                    await bot.send_video(
+                        chat_id=recipient_chat_id,
+                        video=FSInputFile(asset.path),
+                        caption=asset.caption[:1024],
+                        parse_mode=None,
+                        supports_streaming=True,
+                    )
+                    await mark_video_asset_sent(prediction.id)
+                    asset_sent = True
+                    cleanup_video_asset(asset.path)
+
+            if text_sent or asset_sent:
+                sent += 1
         except Exception as exc:
             logger.exception("Failed to send video script prediction=%s to user=%s: %s", prediction.id, recipient_chat_id, exc)
     return sent
@@ -107,6 +139,24 @@ async def mark_video_script_sent(prediction_id: int) -> None:
         if prediction:
             prediction.video_script_sent_at = datetime.utcnow()
             await session.commit()
+
+
+async def mark_video_asset_sent(prediction_id: int) -> None:
+    async with SessionLocal() as session:
+        prediction = await session.get(Prediction, prediction_id)
+        if prediction:
+            prediction.video_asset_sent_at = datetime.utcnow()
+            await session.commit()
+
+
+def cleanup_video_asset(path: Path) -> None:
+    settings = get_settings()
+    if settings.video_assets_keep_files:
+        return
+    try:
+        path.unlink(missing_ok=True)
+    except Exception:
+        logger.warning("Failed to remove generated video asset: %s", path)
 
 
 def render_video_script_message(prediction: Prediction, index: int = 1, total: int = 1) -> str:
