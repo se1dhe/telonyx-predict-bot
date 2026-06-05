@@ -5,8 +5,9 @@ from datetime import date, datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from aiogram import Bot, FSInputFile
+from aiogram import Bot
 from aiogram.enums import ParseMode
+from aiogram.types import FSInputFile
 from sqlalchemy import select
 
 from app.config import get_settings
