@@ -297,18 +297,18 @@ async def render_vertical_video(
             f"drawbox=x={pad - 18}:y={pick_y - 34}:w=5:h={height // 4}:color=0x8ab4ff@0.84:t=fill:enable='between(t,2.6,{duration})'",
             f"drawbox=x={pad}:y={height // 15}:w={width - 2 * pad}:h=4:color=0x32d583@0.95:t=fill",
             f"drawbox=x={pad}:y={height - 92}:w={width - 2 * pad}:h=2:color=0x8ab4ff@0.45:t=fill",
-            draw_text(font_file, "TELONYX AI SIGNAL", scale_font(30, width), pad, height // 23, "0x32d583", alpha="if(lt(t,0.4),t/0.4,1)"),
+            draw_text(font_file, "TELONYX: СИГНАЛ НЕЙРОСЕТИ", scale_font(27, width), pad, height // 23, "0x32d583", alpha="if(lt(t,0.4),t/0.4,1)"),
             "fade=t=in:st=0:d=0.45",
         ]
     )
     filters.extend(draw_text_block(font_file, title.upper(), scale_font(50, width), pad, title_y, "white", 18, 3, line_gap=12, start=0.35))
-    filters.extend(draw_text_block(font_file, "MAIN PICK", scale_font(25, width), pad, pick_y, "0x8ab4ff", 28, 1, start=2.5))
+    filters.extend(draw_text_block(font_file, "ОСНОВНАЯ СТАВКА", scale_font(25, width), pad, pick_y, "0x8ab4ff", 28, 1, start=2.5))
     filters.extend(draw_text_block(font_file, main_bet.upper(), scale_font(43, width), pad, pick_y + scale_font(46, width), "white", 20, 2, line_gap=10, start=2.9))
-    filters.extend(draw_text_block(font_file, f"CONFIDENCE {confidence}/100", scale_font(36, width), pad, height // 2 + 20, "0x32d583", 26, 1, start=5.2))
+    filters.extend(draw_text_block(font_file, f"УВЕРЕННОСТЬ {confidence}/100", scale_font(34, width), pad, height // 2 + 20, "0x32d583", 26, 1, start=5.2))
     filters.extend(draw_text_block(font_file, f"{bookmaker} {odds}".strip(), scale_font(28, width), pad, height // 2 + 82, "0xfed766", 26, 1, start=5.6))
     filters.extend(draw_text_block(font_file, why, scale_font(29, width), pad, height // 2 + 175, "white", 29, 4, line_gap=9, start=7.0))
     filters.extend(draw_text_block(font_file, time_text, scale_font(24, width), pad, height - 205, "0xb8c4d9", 28, 1, start=10.0))
-    filters.extend(draw_text_block(font_file, "FULL BREAKDOWN IN TELEGRAM", scale_font(28, width), pad, height - 132, "0x32d583", 29, 1, start=11.0))
+    filters.extend(draw_text_block(font_file, "ПОЛНЫЙ РАЗБОР В ТЕЛЕГРАМЕ", scale_font(27, width), pad, height - 132, "0x32d583", 29, 1, start=11.0))
     filters.append(f"fade=t=out:st={duration - 0.7}:d=0.7")
 
     cmd = [
@@ -406,12 +406,12 @@ def build_voiceover_text(prediction: Prediction, pick: AiPick | None) -> str:
 
     return (
         f"Нейросеть разобрала матч {title}. "
-        f"Источник данных: API Football и линия {bookmaker}. "
+        f"Источник данных: футбольная статистика и линия {bookmaker}. "
         f"Уверенность модели: {confidence} из 100. "
         f"Основная ставка: {main_bet}. "
         f"Ключевая причина: {reasoning}. "
         "Это не гарантия, а статистический фильтр. "
-        "Полный разбор, рискованный вариант и ссылка на линию уже в Telegram."
+        "Полный разбор, рискованный вариант и ссылка на линию уже в Телеграме."
     )
 
 
@@ -419,7 +419,7 @@ def build_video_caption(prediction: Prediction, pick: AiPick | None) -> str:
     title = match_title(prediction, pick)
     main_bet = bet_name(pick, "ru") if pick else simple_bet_name(prediction.main_bet_label or prediction.main_bet_code, "ru")
     confidence = pick.confidence if pick else prediction.confidence
-    return f"🎥 Видео для Shorts/TikTok\n⚽️ {title}\n🎯 {main_bet}\nAI confidence: {confidence}/100"
+    return f"🎥 Видео для короткого формата\n⚽️ {title}\n🎯 {main_bet}\nУверенность нейросети: {confidence}/100"
 
 
 def match_title(prediction: Prediction, pick: AiPick | None) -> str:
