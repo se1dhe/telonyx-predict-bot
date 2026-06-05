@@ -67,6 +67,7 @@ async def generate_video_asset_for_prediction(prediction: Prediction) -> VideoAs
 
 async def create_voiceover_audio(text: str, output_path: Path, settings: Settings) -> None:
     """Create voiceover audio with Gemini, cache, retry/backoff, and a no-crash fallback."""
+    text = prepare_tts_text_ru(text)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     cache_path = voiceover_cache_path(text, settings)
     if cache_path.exists() and cache_path.stat().st_size > 0:
@@ -346,22 +347,24 @@ async def render_vertical_video(
 def build_cinematic_background_filters(width: int, height: int, fps: int, duration: int) -> list[str]:
     """Procedural vertical background: no external assets required."""
     cell = max(54, width // 11)
+    slow_cell = cell * 2
     glow_h = max(150, height // 7)
     lower_band_y = height - height // 4
     return [
         f"color=c=0x07111f:s={width}x{height}:r={fps}:d={duration}",
         "format=yuv420p",
         f"drawbox=x=0:y=0:w={width}:h={height}:color=0x020612@0.26:t=fill",
-        f"drawgrid=width={cell}:height={cell}:thickness=1:color=0x1f6f8f@0.18",
-        f"drawbox=x=0:y=0:w={width}:h={height // 3}:color=0x064b75@0.20:t=fill",
-        f"drawbox=x=0:y={lower_band_y}:w={width}:h={height - lower_band_y}:color=0x063a24@0.18:t=fill",
-        f"drawbox=x='mod(t*64,{width + width // 2})-{width // 2}':y={height // 11}:w={width // 2}:h=3:color=0x32d583@0.82:t=fill",
-        f"drawbox=x='mod(t*39,{width + width // 3})-{width // 3}':y={height // 5}:w={width // 3}:h=2:color=0x8ab4ff@0.60:t=fill",
-        f"drawbox=x='mod(t*51,{width + width // 2})-{width // 2}':y={height - height // 5}:w={width // 2}:h=3:color=0xfed766@0.50:t=fill",
-        f"drawbox=x={width // 11}:y='mod(t*42,{height + 240})-240':w=2:h=240:color=0x32d583@0.24:t=fill",
-        f"drawbox=x={width - width // 8}:y='mod(t*31,{height + 320})-320':w=2:h=320:color=0x8ab4ff@0.22:t=fill",
-        f"drawbox=x={width // 5}:y={height // 3}:w={width - 2 * (width // 5)}:h={glow_h}:color=0x32d583@0.08:t=fill",
-        f"drawbox=x={width // 7}:y={height // 2 + height // 12}:w={width - 2 * (width // 7)}:h={glow_h}:color=0x8ab4ff@0.07:t=fill",
+        f"drawgrid=x='-mod(t*8,{cell})':y='-mod(t*5,{cell})':width={cell}:height={cell}:thickness=1:color=0x1f6f8f@0.13",
+        f"drawgrid=x='-mod(t*3,{slow_cell})':y='-mod(t*2,{slow_cell})':width={slow_cell}:height={slow_cell}:thickness=1:color=0x32d583@0.07",
+        f"drawbox=x=0:y=0:w={width}:h={height // 3}:color=0x064b75@0.18:t=fill",
+        f"drawbox=x=0:y={lower_band_y}:w={width}:h={height - lower_band_y}:color=0x063a24@0.16:t=fill",
+        f"drawbox=x='mod(t*48,{width + width // 2})-{width // 2}':y='{height // 11}+sin(t*0.9)*18':w={width // 2}:h=3:color=0x32d583@0.76:t=fill",
+        f"drawbox=x='mod(t*30,{width + width // 3})-{width // 3}':y='{height // 5}+sin(t*0.7+1.6)*22':w={width // 3}:h=2:color=0x8ab4ff@0.54:t=fill",
+        f"drawbox=x='mod(t*38,{width + width // 2})-{width // 2}':y='{height - height // 5}+sin(t*0.55+2.4)*16':w={width // 2}:h=3:color=0xfed766@0.42:t=fill",
+        f"drawbox=x='{width // 11}+sin(t*0.45)*18':y='mod(t*28,{height + 240})-240':w=2:h=240:color=0x32d583@0.20:t=fill",
+        f"drawbox=x='{width - width // 8}+sin(t*0.35+1.2)*22':y='mod(t*22,{height + 320})-320':w=2:h=320:color=0x8ab4ff@0.18:t=fill",
+        f"drawbox=x='{width // 5}+sin(t*0.38)*35':y='{height // 3}+sin(t*0.30)*24':w={width - 2 * (width // 5)}:h={glow_h}:color=0x32d583@0.075:t=fill",
+        f"drawbox=x='{width // 7}+sin(t*0.28+2.1)*42':y='{height // 2 + height // 12}+sin(t*0.25)*28':w={width - 2 * (width // 7)}:h={glow_h}:color=0x8ab4ff@0.065:t=fill",
         f"drawbox=x=0:y=0:w={width}:h={height}:color=black@0.22:t=fill",
     ]
 
@@ -421,6 +424,28 @@ def build_voiceover_text(prediction: Prediction, pick: AiPick | None) -> str:
 def clean_voiceover_sentence(value: str) -> str:
     text = re.sub(r"\s+", " ", str(value or "")).strip()
     return text.rstrip(".!?…")
+
+
+def prepare_tts_text_ru(value: str) -> str:
+    """Rewrite betting shorthand into phrases Russian TTS pronounces naturally."""
+    text = re.sub(r"\s+", " ", str(value or "")).strip()
+    replacements = {
+        "Тотал больше 1.5 гола": "ставка на больше одного с половиной голов",
+        "Тотал больше 1.5": "ставка на больше одного с половиной голов",
+        "тотал больше 1.5": "больше одного с половиной голов",
+        "тотала больше 1.5": "больше одного с половиной голов",
+        "ТБ 1.5": "тотал больше одного с половиной",
+        "ТБ1.5": "тотал больше одного с половиной",
+        "ТБ 2.5": "тотал больше двух с половиной",
+        "ТБ2.5": "тотал больше двух с половиной",
+        "ОЗ": "обе забьют",
+        "BTTS": "обе команды забьют",
+        "коэффициент": "кеф",
+        "Коэффициент": "Кеф",
+    }
+    for source, target in replacements.items():
+        text = text.replace(source, target)
+    return text
 
 
 def build_video_caption(prediction: Prediction, pick: AiPick | None) -> str:
